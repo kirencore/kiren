@@ -1,0 +1,209 @@
+use crate::api::{fetch, filesystem, http, process, timers};
+use anyhow::Result;
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
+use std::sync::{Arc, Mutex, Once};
+use std::time::Instant;
+use v8;
+
+static INIT: Once = Once::new();
+static CONSOLE_TIMERS: Lazy<DashMap<String, Instant>> = Lazy::new(|| DashMap::new());
+
+pub struct Engine {
+    isolate: v8::OwnedIsolate,
+}
+
+impl Engine {
+    pub fn new() -> Result<Self> {
+        INIT.call_once(|| {
+            // Use optimal thread count for better performance
+            let thread_count = std::thread::available_parallelism()
+                .map(|n| n.get().try_into().unwrap_or(4u32))
+                .unwrap_or(4);
+            let platform = v8::new_default_platform(thread_count, false).make_shared();
+            v8::V8::initialize_platform(platform);
+            v8::V8::initialize();
+        });
+
+        // Create isolate with default settings (V8 0.84 limitations)
+        let mut isolate = v8::Isolate::new(Default::default());
+
+        // Performance optimizations
+        isolate.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
+
+        Ok(Engine { isolate })
+    }
+
+    pub fn execute(&mut self, source: &str) -> Result<String> {
+        self.execute_with_callbacks(source, true)
+    }
+
+    pub fn execute_with_callbacks(
+        &mut self,
+        source: &str,
+        process_callbacks: bool,
+    ) -> Result<String> {
+        let scope = &mut v8::HandleScope::new(&mut self.isolate);
+        let context = v8::Context::new(scope);
+        let scope = &mut v8::ContextScope::new(scope, context);
+
+        // Console API implementation
+        let global = context.global(scope);
+        let console_key = v8::String::new(scope, "console").unwrap();
+        let console_obj = v8::Object::new(scope);
+
+        // console.log
+        let log_key = v8::String::new(scope, "log").unwrap();
+        let log_tmpl = v8::FunctionTemplate::new(scope, console_log);
+        let log_func = log_tmpl.get_function(scope).unwrap();
+        console_obj.set(scope, log_key.into(), log_func.into());
+
+        // console.time
+        let time_key = v8::String::new(scope, "time").unwrap();
+        let time_tmpl = v8::FunctionTemplate::new(scope, console_time);
+        let time_func = time_tmpl.get_function(scope).unwrap();
+        console_obj.set(scope, time_key.into(), time_func.into());
+
+        // console.timeEnd
+        let time_end_key = v8::String::new(scope, "timeEnd").unwrap();
+        let time_end_tmpl = v8::FunctionTemplate::new(scope, console_time_end);
+        let time_end_func = time_end_tmpl.get_function(scope).unwrap();
+        console_obj.set(scope, time_end_key.into(), time_end_func.into());
+
+        global.set(scope, console_key.into(), console_obj.into());
+
+        // Setup Timer APIs
+        timers::setup_timers(scope, context)?;
+
+        // Setup Fetch API
+        fetch::setup_fetch(scope, context)?;
+
+        // Setup File System API
+        filesystem::setup_filesystem(scope, context)?;
+
+        // Setup Process API
+        process::setup_process(scope, context)?;
+
+        // Setup HTTP Server API
+        http::setup_http(scope, context)?;
+
+        // Setup ES Modules support
+        crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
+
+        // Setup CommonJS support
+        crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
+
+        // Execute JavaScript with better error handling
+        let source_string = v8::String::new(scope, source).unwrap();
+        let filename = v8::String::new(scope, "<eval>").unwrap();
+
+        // Create script origin for better stack traces
+        let undefined_val = v8::undefined(scope);
+        let origin = v8::ScriptOrigin::new(
+            scope,
+            filename.into(),
+            0,                    // line offset
+            0,                    // column offset
+            false,                // is shared cross origin
+            0,                    // script id
+            undefined_val.into(), // source map url
+            false,                // is opaque
+            false,                // is wasm
+            false,                // is module
+        );
+
+        let script = match v8::Script::compile(scope, source_string, Some(&origin)) {
+            Some(script) => script,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Syntax Error: Failed to compile JavaScript"
+                ));
+            }
+        };
+
+        match script.run(scope) {
+            Some(result) => {
+                let result_str = result.to_string(scope).unwrap();
+                let result_string = result_str.to_rust_string_lossy(scope);
+
+                // Process any queued timer callbacks if requested
+                if process_callbacks {
+                    timers::process_timer_callbacks(scope)?;
+                }
+
+                Ok(result_string)
+            }
+            None => Err(anyhow::anyhow!(
+                "Runtime Error: Failed to execute JavaScript"
+            )),
+        }
+    }
+}
+
+fn console_log(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let mut output = String::new();
+    for i in 0..args.length() {
+        if i > 0 {
+            output.push(' ');
+        }
+        let arg = args.get(i);
+        let str_val = arg.to_string(scope).unwrap();
+        output.push_str(&str_val.to_rust_string_lossy(scope));
+    }
+    println!("{}", output);
+}
+
+fn console_time(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let label = if args.length() > 0 {
+        let arg = args.get(0);
+        let str_val = arg.to_string(scope).unwrap();
+        str_val.to_rust_string_lossy(scope)
+    } else {
+        "default".to_string()
+    };
+
+    CONSOLE_TIMERS.insert(label, Instant::now());
+}
+
+fn console_time_end(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let label = if args.length() > 0 {
+        let arg = args.get(0);
+        let str_val = arg.to_string(scope).unwrap();
+        str_val.to_rust_string_lossy(scope)
+    } else {
+        "default".to_string()
+    };
+
+    if let Some((_, start_time)) = CONSOLE_TIMERS.remove(&label) {
+        let elapsed = start_time.elapsed();
+        println!("{}: {:.3}ms", label, elapsed.as_secs_f64() * 1000.0);
+    } else {
+        println!("Timer '{}' does not exist", label);
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // Cleanup is handled automatically by V8
+        // No need for unsafe dispose in modern V8
+    }
+}
+
+// Performance utilities
+static MODULE_CACHE: Lazy<Arc<Mutex<std::collections::HashMap<String, String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
+
+static IMPORT_META_RESOLVE: Lazy<Arc<Mutex<std::collections::HashMap<String, String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));

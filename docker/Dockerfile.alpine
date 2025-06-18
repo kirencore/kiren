@@ -1,0 +1,29 @@
+# Multi-stage build for smaller image
+FROM alpine:latest as base
+
+# Install CA certificates for HTTPS
+RUN apk --no-cache add ca-certificates
+
+# Create non-root user
+RUN addgroup -S kiren && adduser -S kiren -G kiren
+
+# Runtime image
+FROM scratch
+
+# Copy CA certificates and user from base
+COPY --from=base /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=base /etc/passwd /etc/passwd
+COPY --from=base /etc/group /etc/group
+
+# Copy Kiren binary
+COPY target/release/kiren /usr/local/bin/kiren
+
+# Set user
+USER kiren
+
+# Expose default port
+EXPOSE 3000
+
+# Default command
+ENTRYPOINT ["/usr/local/bin/kiren"]
+CMD ["--help"]

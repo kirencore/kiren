@@ -1,0 +1,38 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# V8 artifacts
+librusty_v8_*.a
+gn_out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test files
+test.txt
+test-dir/
+logs/
+backup-*/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Docker
+.dockerignore
