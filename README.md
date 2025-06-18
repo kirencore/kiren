@@ -76,30 +76,47 @@ make examples       # List available examples
 
 ## 📦 Installation
 
-### Quick Install (One-liner)
+### 🚀 Quick Install (Recommended)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mertcanaltin/kiren/main/install.sh | bash
+# One-line installer (macOS/Linux)
+curl -fsSL https://raw.githubusercontent.com/kirencore/kiren/main/install.sh | bash
 ```
 
-### Package Managers
+### 🍺 Package Managers
 ```bash
-# Homebrew (macOS/Linux)
+# Homebrew (macOS/Linux) - Coming Soon
 brew install kiren
 
 # Cargo (Rust users)
-cargo install kiren
+cargo install --git https://github.com/kirencore/kiren
+
+# NPM (Node.js users) - Coming Soon  
+npm install -g kiren-runtime
 
 # Docker
-docker run -it ghcr.io/mertcanaltin/kiren --repl
+docker run -it ghcr.io/kirencore/kiren --repl
 ```
 
-### Manual Download
-Download from [GitHub Releases](https://github.com/mertcanaltin/kiren/releases)
+### 📥 Manual Download
+Download pre-built binaries from [GitHub Releases](https://github.com/kirencore/kiren/releases/tag/v0.1.0)
 
-**Supported Platforms:**
-- ✅ Linux (x64, ARM64)
-- ✅ macOS (Intel, Apple Silicon)  
-- ✅ Windows (x64)
+**Available Platforms:**
+- ✅ **Linux** (x64, ARM64) - `kiren-linux-x64.tar.gz`, `kiren-linux-arm64.tar.gz`
+- ✅ **macOS** (Intel, Apple Silicon) - `kiren-macos-x64.tar.gz`, `kiren-macos-arm64.tar.gz`
+- ✅ **Windows** (x64) - `kiren-windows-x64.zip`
+
+### 🛠️ Build from Source
+```bash
+# Clone repository
+git clone https://github.com/kirencore/kiren.git
+cd kiren
+
+# Build release
+cargo build --release
+
+# Install locally
+cp target/release/kiren /usr/local/bin/
+```
 
 Detaylı kurulum talimatları: [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)
 

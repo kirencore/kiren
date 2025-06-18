@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# Kiren Installation Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/mertcanaltin/kiren/main/install.sh | bash
+# Kiren JavaScript Runtime - One-Line Installation Script
+# Usage: curl -fsSL https://raw.githubusercontent.com/kirencore/kiren/main/install.sh | bash
 
 set -e
 
-# Colors
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # Constants
-GITHUB_REPO="mertcanaltin/kiren"
-INSTALL_DIR="${KIREN_INSTALL_DIR:-/usr/local/bin}"
-TMP_DIR="/tmp/kiren-install"
+GITHUB_REPO="kirencore/kiren"
+VERSION="v0.1.0"
+INSTALL_DIR="/usr/local/bin"
 
 # Functions
 log() {
@@ -82,47 +82,32 @@ get_latest_version() {
 # Download and install
 install_kiren() {
     local platform=$(detect_platform)
-    local version=${KIREN_VERSION:-$(get_latest_version)}
+    local version=${KIREN_VERSION:-$VERSION}
     
-    if [ -z "$version" ]; then
-        error "Could not determine version to install"
-    fi
-    
-    log "Installing Kiren v$version for $platform..."
+    log "Installing Kiren $version for $platform..."
     
     # Create temp directory
-    mkdir -p "$TMP_DIR"
-    cd "$TMP_DIR"
+    local tmp_dir=$(mktemp -d)
+    cd "$tmp_dir"
     
-    # Download URL
-    local file_name="kiren-$platform"
-    local download_url="https://github.com/$GITHUB_REPO/releases/download/v$version/$file_name.tar.gz"
-    
-    if [[ $platform == "windows-x64" ]]; then
-        download_url="https://github.com/$GITHUB_REPO/releases/download/v$version/$file_name.zip"
-    fi
+    # For now, we only have single binary from release
+    # In future releases, we'll have platform-specific binaries
+    local download_url="https://github.com/$GITHUB_REPO/releases/download/$version/kiren"
     
     log "Downloading from: $download_url"
     
     # Download binary
     if command -v curl &> /dev/null; then
-        curl -fsSL "$download_url" -o "kiren-archive"
+        curl -fsSL "$download_url" -o "kiren"
     elif command -v wget &> /dev/null; then
-        wget -q "$download_url" -O "kiren-archive"
+        wget -q "$download_url" -O "kiren"
     else
         error "Neither curl nor wget is available"
     fi
     
-    # Extract
-    if [[ $platform == "windows-x64" ]]; then
-        unzip -q kiren-archive
-        chmod +x kiren.exe
-        binary_name="kiren.exe"
-    else
-        tar -xzf kiren-archive
-        chmod +x kiren
-        binary_name="kiren"
-    fi
+    # Make executable
+    chmod +x kiren
+    binary_name="kiren"
     
     # Install to system
     if [ -w "$INSTALL_DIR" ]; then
@@ -136,7 +121,7 @@ install_kiren() {
     
     # Cleanup
     cd /
-    rm -rf "$TMP_DIR"
+    rm -rf "$tmp_dir"
     
     # Verify installation
     if command -v kiren &> /dev/null; then

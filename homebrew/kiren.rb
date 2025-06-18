@@ -1,16 +1,16 @@
 class Kiren < Formula
   desc "High-performance JavaScript runtime built with Rust"
-  homepage "https://github.com/mertcanaltin/kiren"
+  homepage "https://github.com/kirencore/kiren"
   license "MIT"
 
   if OS.mac? && Hardware::CPU.arm?
-    url "https://github.com/mertcanaltin/kiren/releases/download/v0.1.0/kiren-macos-arm64.tar.gz"
+    url "https://github.com/kirencore/kiren/releases/download/v0.1.0/kiren-macos-arm64.tar.gz"
     sha256 "SHA256_ARM64_HERE"
   elsif OS.mac? && Hardware::CPU.intel?
-    url "https://github.com/mertcanaltin/kiren/releases/download/v0.1.0/kiren-macos-x64.tar.gz"
+    url "https://github.com/kirencore/kiren/releases/download/v0.1.0/kiren-macos-x64.tar.gz"
     sha256 "SHA256_X64_HERE"
   elsif OS.linux? && Hardware::CPU.intel?
-    url "https://github.com/mertcanaltin/kiren/releases/download/v0.1.0/kiren-linux-x64.tar.gz"
+    url "https://github.com/kirencore/kiren/releases/download/v0.1.0/kiren-linux-x64.tar.gz"
     sha256 "SHA256_LINUX_HERE"
   end
 

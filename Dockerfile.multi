@@ -1,0 +1,24 @@
+# Multi-stage build for minimal container
+FROM rust:1.75 as builder
+
+WORKDIR /app
+COPY . .
+
+# Build release binary
+RUN cargo build --release
+
+# Runtime container - minimal size
+FROM scratch
+
+# Copy binary
+COPY --from=builder /app/target/release/kiren /kiren
+
+# Copy examples
+COPY --from=builder /app/examples /examples
+
+# Expose default port
+EXPOSE 3000
+
+# Default to REPL mode
+ENTRYPOINT ["/kiren"]
+CMD ["--repl"]
