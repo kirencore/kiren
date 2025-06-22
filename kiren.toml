@@ -1,0 +1,41 @@
+# Kiren v2.0 Configuration File
+
+[runtime]
+# V8 engine flags
+v8_flags = ["--expose-gc", "--max-old-space-size=512"]
+# Memory limit in MB
+memory_limit = 512
+# Max old space size in MB  
+max_old_space_size = 256
+
+[server]
+# Default HTTP server port
+default_port = 3000
+# Enable CORS
+cors_enabled = true
+# Allowed CORS origins
+cors_origins = ["*"]
+# Request timeout in seconds
+request_timeout = 30
+# Max request size in bytes (1MB)
+max_request_size = 1048576
+
+[watch]
+# Enable watch mode by default
+enabled = false
+# File patterns to ignore
+ignore_patterns = [
+    "node_modules/**",
+    ".git/**",
+    "*.log",
+    "dist/**",
+    "build/**"
+]
+# Debounce delay in milliseconds
+debounce_ms = 50
+
+[environment]
+# Custom environment variables
+NODE_ENV = "development"
+DEBUG = "kiren:*"
+LOG_LEVEL = "info"

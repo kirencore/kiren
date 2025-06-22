@@ -1,4 +1,4 @@
-use crate::api::{fetch, filesystem, http, process, timers};
+use crate::api::{environment, fetch, filesystem, http, process, timers};
 use anyhow::Result;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -11,6 +11,7 @@ static CONSOLE_TIMERS: Lazy<DashMap<String, Instant>> = Lazy::new(|| DashMap::ne
 
 pub struct Engine {
     isolate: v8::OwnedIsolate,
+    context_initialized: bool,
 }
 
 impl Engine {
@@ -31,11 +32,49 @@ impl Engine {
         // Performance optimizations
         isolate.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
 
-        Ok(Engine { isolate })
+        Ok(Engine { 
+            isolate,
+            context_initialized: false,
+        })
     }
 
     pub fn execute(&mut self, source: &str) -> Result<String> {
         self.execute_with_callbacks(source, true)
+    }
+
+    pub fn execute_module(&mut self, source: &str, module_name: &str) -> Result<String> {
+        // Static import'ları dynamic import'a dönüştür
+        let transformed_source = self.transform_static_imports(source);
+        
+        
+        // Normal execute ile çalıştır ama module context'te
+        self.execute_with_callbacks(&transformed_source, true)
+    }
+
+    fn transform_static_imports(&self, source: &str) -> String {
+        // Fast path: sadece import keyword'ü varsa transform et
+        if !source.contains("import ") && !source.contains("export ") {
+            return source.to_string();
+        }
+        
+        // Önce named imports'u transform et - custom import function kullan
+        let mut transformed = NAMED_IMPORT_REGEX.replace_all(source, "const { $1 } = await __kiren_import('$2');").to_string();
+        
+        // Sonra default imports'u transform et - custom import function kullan
+        transformed = DEFAULT_IMPORT_REGEX.replace_all(&transformed, "const $1 = (await __kiren_import('$2')).default;").to_string();
+        
+        // Export statement'ları comment out et (basit replace)
+        if transformed.contains("export ") {
+            transformed = transformed.replace("export {", "// export {");
+            transformed = transformed.replace("export default", "// export default");
+        }
+        
+        // Async wrapper sadece transformation yapıldıysa ekle
+        if transformed != source {
+            format!("(async () => {{\n{}\n}})();", transformed)
+        } else {
+            transformed
+        }
     }
 
     pub fn execute_with_callbacks(
@@ -44,53 +83,22 @@ impl Engine {
         process_callbacks: bool,
     ) -> Result<String> {
         let scope = &mut v8::HandleScope::new(&mut self.isolate);
+        
+        // Fast context creation
         let context = v8::Context::new(scope);
         let scope = &mut v8::ContextScope::new(scope, context);
 
-        // Console API implementation
-        let global = context.global(scope);
-        let console_key = v8::String::new(scope, "console").unwrap();
-        let console_obj = v8::Object::new(scope);
-
-        // console.log
-        let log_key = v8::String::new(scope, "log").unwrap();
-        let log_tmpl = v8::FunctionTemplate::new(scope, console_log);
-        let log_func = log_tmpl.get_function(scope).unwrap();
-        console_obj.set(scope, log_key.into(), log_func.into());
-
-        // console.time
-        let time_key = v8::String::new(scope, "time").unwrap();
-        let time_tmpl = v8::FunctionTemplate::new(scope, console_time);
-        let time_func = time_tmpl.get_function(scope).unwrap();
-        console_obj.set(scope, time_key.into(), time_func.into());
-
-        // console.timeEnd
-        let time_end_key = v8::String::new(scope, "timeEnd").unwrap();
-        let time_end_tmpl = v8::FunctionTemplate::new(scope, console_time_end);
-        let time_end_func = time_end_tmpl.get_function(scope).unwrap();
-        console_obj.set(scope, time_end_key.into(), time_end_func.into());
-
-        global.set(scope, console_key.into(), console_obj.into());
-
-        // Setup Timer APIs
+        // Setup all APIs - simplified for now
+        crate::api::console::setup_console(scope, context)?;
+        crate::api::errors::setup_error_handling(scope, context)?;
+        crate::api::npm_simple::setup_npm_compatibility(scope, context)?;
         timers::setup_timers(scope, context)?;
-
-        // Setup Fetch API
         fetch::setup_fetch(scope, context)?;
-
-        // Setup File System API
         filesystem::setup_filesystem(scope, context)?;
-
-        // Setup Process API
         process::setup_process(scope, context)?;
-
-        // Setup HTTP Server API
+        environment::setup_environment(scope, context)?;
         http::setup_http(scope, context)?;
-
-        // Setup ES Modules support
         crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
-
-        // Setup CommonJS support
         crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
 
         // Execute JavaScript with better error handling
@@ -138,6 +146,46 @@ impl Engine {
             )),
         }
     }
+
+    fn setup_apis(&mut self, scope: &mut v8::ContextScope<v8::HandleScope>, context: v8::Local<v8::Context>) -> Result<()> {
+        // Console API implementation
+        let global = context.global(scope);
+        let console_key = v8::String::new(scope, "console").unwrap();
+        let console_obj = v8::Object::new(scope);
+
+        // console.log
+        let log_key = v8::String::new(scope, "log").unwrap();
+        let log_tmpl = v8::FunctionTemplate::new(scope, console_log);
+        let log_func = log_tmpl.get_function(scope).unwrap();
+        console_obj.set(scope, log_key.into(), log_func.into());
+
+        // console.time
+        let time_key = v8::String::new(scope, "time").unwrap();
+        let time_tmpl = v8::FunctionTemplate::new(scope, console_time);
+        let time_func = time_tmpl.get_function(scope).unwrap();
+        console_obj.set(scope, time_key.into(), time_func.into());
+
+        // console.timeEnd
+        let time_end_key = v8::String::new(scope, "timeEnd").unwrap();
+        let time_end_tmpl = v8::FunctionTemplate::new(scope, console_time_end);
+        let time_end_func = time_end_tmpl.get_function(scope).unwrap();
+        console_obj.set(scope, time_end_key.into(), time_end_func.into());
+
+        global.set(scope, console_key.into(), console_obj.into());
+
+        // Setup all APIs
+        timers::setup_timers(scope, context)?;
+        fetch::setup_fetch(scope, context)?;
+        filesystem::setup_filesystem(scope, context)?;
+        process::setup_process(scope, context)?;
+        http::setup_http(scope, context)?;
+        crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
+        crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
+
+        Ok(())
+    }
+
+
 }
 
 fn console_log(
@@ -207,3 +255,13 @@ static MODULE_CACHE: Lazy<Arc<Mutex<std::collections::HashMap<String, String>>>>
 
 static IMPORT_META_RESOLVE: Lazy<Arc<Mutex<std::collections::HashMap<String, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
+
+// Precompiled regex patterns for performance
+static NAMED_IMPORT_REGEX: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r#"import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?"#).unwrap()
+});
+
+static DEFAULT_IMPORT_REGEX: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r#"import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?"#).unwrap()
+});
+

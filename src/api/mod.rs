@@ -1,6 +1,9 @@
 pub mod console;
+pub mod environment;
+pub mod errors;
 pub mod fetch;
 pub mod filesystem;
 pub mod http;
+pub mod npm_simple;
 pub mod process;
 pub mod timers;

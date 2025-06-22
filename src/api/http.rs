@@ -1,22 +1,62 @@
 use anyhow::Result;
+use crossbeam_channel::{bounded, Receiver, Sender};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use once_cell::sync::Lazy;
 use serde_json::json;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::time::timeout;
+use uuid::Uuid;
 use v8;
+use tokio::sync::broadcast;
 
-// Safe route storage without V8 handles
+// HTTP callback execution system
+#[derive(Debug, Clone)]
+pub struct HttpCallbackRequest {
+    pub id: String,
+    pub method: String,
+    pub path: String,
+    pub query: String,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct HttpCallbackResponse {
+    pub id: String,
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+// Route storage with callback info
 #[derive(Clone)]
 struct RouteInfo {
     method: String,
     path: String,
-    response: String,
+    callback_id: Option<String>, // V8 callback function ID
+    static_response: Option<String>, // For string responses
 }
 
 static ROUTES: Lazy<Arc<Mutex<Vec<RouteInfo>>>> = Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+// Server shutdown management
+static SHUTDOWN_SENDER: Lazy<Arc<Mutex<Option<broadcast::Sender<()>>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+
+// Simplified approach - removed complex callback system
+
+pub fn shutdown_http_servers() {
+    if let Some(sender) = SHUTDOWN_SENDER.lock().unwrap().as_ref() {
+        let _ = sender.send(()); // Ignore error if no receivers
+    }
+    
+    // Clear routes for fresh start
+    ROUTES.lock().unwrap().clear();
+}
 
 pub fn setup_http(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
     let global = context.global(scope);
@@ -36,11 +76,12 @@ pub fn setup_http(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) 
     Ok(())
 }
 
-fn create_server(
+pub fn create_server(
     scope: &mut v8::HandleScope,
     _args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
+    
     // Create server object
     let server_obj = v8::Object::new(scope);
 
@@ -88,26 +129,18 @@ fn server_listen(
         3000
     };
 
-    // SAFETY: Don't spawn server in background to avoid scope issues
-    // Instead, use a controlled approach
-    println!("🚀 Kiren HTTP server configured for port {}", port);
-    println!("✅ Server running at http://localhost:{}", port);
-    println!("🔗 Health check: http://localhost:{}/health", port);
-    println!("📊 API stats: http://localhost:{}/api/stats", port);
-
-    // Start server in a controlled way using current thread
+    // Create new shutdown channel for this server
+    let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
+    *SHUTDOWN_SENDER.lock().unwrap() = Some(shutdown_tx);
+    
+    // Start server in background thread
     std::thread::spawn(move || {
-        println!("🔧 Starting HTTP server thread on port {}", port);
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            println!("🚀 HTTP server runtime created, binding to address...");
-            if let Err(e) = start_http_server(port).await {
-                eprintln!("❌ Server error: {}", e);
-            } else {
-                println!("✅ HTTP server started successfully on port {}", port);
+            if let Err(e) = start_http_server(port, shutdown_rx).await {
+                eprintln!("Server error: {}", e);
             }
         });
-        println!("🔚 HTTP server thread ending");
     });
 }
 
@@ -116,33 +149,7 @@ fn server_get(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
-    if args.length() < 2 {
-        return;
-    }
-
-    let path_arg = args.get(0);
-    let path_str = path_arg.to_string(scope).unwrap();
-    let path = path_str.to_rust_string_lossy(scope);
-
-    // SAFETY: Store route info without V8 handles
-    let callback_arg = args.get(1);
-    let response_content = if callback_arg.is_string() {
-        // If callback is a string, use it as response
-        let response_str = callback_arg.to_string(scope).unwrap();
-        response_str.to_rust_string_lossy(scope)
-    } else {
-        // Default response for function callbacks (not implemented yet)
-        format!("Route handler for GET {}", path)
-    };
-
-    let route = RouteInfo {
-        method: "GET".to_string(),
-        path: path.clone(),
-        response: response_content,
-    };
-
-    ROUTES.lock().unwrap().push(route);
-    println!("GET route registered: {}", path);
+    register_route(scope, args, "GET");
 }
 
 fn server_post(
@@ -150,6 +157,14 @@ fn server_post(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
+    register_route(scope, args, "POST");
+}
+
+fn register_route(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    method: &str,
+) {
     if args.length() < 2 {
         return;
     }
@@ -158,25 +173,92 @@ fn server_post(
     let path_str = path_arg.to_string(scope).unwrap();
     let path = path_str.to_rust_string_lossy(scope);
 
-    // SAFETY: Store route info without V8 handles
     let callback_arg = args.get(1);
-    let response_content = if callback_arg.is_string() {
-        // If callback is a string, use it as response
+    
+    let route = if callback_arg.is_string() {
+        // Static string response
         let response_str = callback_arg.to_string(scope).unwrap();
-        response_str.to_rust_string_lossy(scope)
+        let response = response_str.to_rust_string_lossy(scope);
+        
+        RouteInfo {
+            method: method.to_string(),
+            path: path.clone(),
+            callback_id: None,
+            static_response: Some(response),
+        }
+    } else if callback_arg.is_function() {
+        // Function callback - execute immediately to get return value
+        let callback_fn: v8::Local<v8::Function> = callback_arg.try_into().unwrap();
+        
+        // Create mock request/response objects for immediate execution
+        let undefined = v8::undefined(scope);
+        let args = [];
+        
+        // Execute the callback immediately
+        if let Some(result) = callback_fn.call(scope, undefined.into(), &args) {
+            let response = if result.is_object() && !result.is_string() {
+                // Object result - convert to JSON
+                let json_stringify_key = v8::String::new(scope, "JSON").unwrap();
+                let global = scope.get_current_context().global(scope);
+                
+                if let Some(json_obj) = global.get(scope, json_stringify_key.into()) {
+                    if let Ok(json_obj) = json_obj.try_into() {
+                        let json_obj: v8::Local<v8::Object> = json_obj;
+                        let stringify_key = v8::String::new(scope, "stringify").unwrap();
+                        
+                        if let Some(stringify_fn) = json_obj.get(scope, stringify_key.into()) {
+                            if let Ok(stringify_fn) = stringify_fn.try_into() {
+                                let stringify_fn: v8::Local<v8::Function> = stringify_fn;
+                                let args = [result];
+                                
+                                if let Some(json_result) = stringify_fn.call(scope, json_obj.into(), &args) {
+                                    json_result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+                                } else {
+                                    result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+                                }
+                            } else {
+                                result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+                            }
+                        } else {
+                            result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+                        }
+                    } else {
+                        result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+                    }
+                } else {
+                    result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+                }
+            } else {
+                // String or primitive result
+                result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+            };
+            
+            RouteInfo {
+                method: method.to_string(),
+                path: path.clone(),
+                callback_id: None,
+                static_response: Some(response),
+            }
+        } else {
+            // Fallback if execution fails
+            RouteInfo {
+                method: method.to_string(),
+                path: path.clone(),
+                callback_id: None,
+                static_response: Some(format!("Route handler for {} {}", method, path)),
+            }
+        }
     } else {
-        // Default response for function callbacks (not implemented yet)
-        format!("Route handler for POST {}", path)
-    };
-
-    let route = RouteInfo {
-        method: "POST".to_string(),
-        path: path.clone(),
-        response: response_content,
+        // Default fallback
+        RouteInfo {
+            method: method.to_string(),
+            path: path.clone(),
+            callback_id: None,
+            static_response: Some(format!("Route handler for {} {}", method, path)),
+        }
     };
 
     ROUTES.lock().unwrap().push(route);
-    println!("POST route registered: {}", path);
 }
 
 fn server_put(
@@ -184,33 +266,7 @@ fn server_put(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
-    if args.length() < 2 {
-        return;
-    }
-
-    let path_arg = args.get(0);
-    let path_str = path_arg.to_string(scope).unwrap();
-    let path = path_str.to_rust_string_lossy(scope);
-
-    // SAFETY: Store route info without V8 handles
-    let callback_arg = args.get(1);
-    let response_content = if callback_arg.is_string() {
-        // If callback is a string, use it as response
-        let response_str = callback_arg.to_string(scope).unwrap();
-        response_str.to_rust_string_lossy(scope)
-    } else {
-        // Default response for function callbacks (not implemented yet)
-        format!("Route handler for PUT {}", path)
-    };
-
-    let route = RouteInfo {
-        method: "PUT".to_string(),
-        path: path.clone(),
-        response: response_content,
-    };
-
-    ROUTES.lock().unwrap().push(route);
-    println!("PUT route registered: {}", path);
+    register_route(scope, args, "PUT");
 }
 
 fn server_delete(
@@ -218,51 +274,29 @@ fn server_delete(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
-    if args.length() < 2 {
-        return;
-    }
-
-    let path_arg = args.get(0);
-    let path_str = path_arg.to_string(scope).unwrap();
-    let path = path_str.to_rust_string_lossy(scope);
-
-    // SAFETY: Store route info without V8 handles
-    let callback_arg = args.get(1);
-    let response_content = if callback_arg.is_string() {
-        // If callback is a string, use it as response
-        let response_str = callback_arg.to_string(scope).unwrap();
-        response_str.to_rust_string_lossy(scope)
-    } else {
-        // Default response for function callbacks (not implemented yet)
-        format!("Route handler for DELETE {}", path)
-    };
-
-    let route = RouteInfo {
-        method: "DELETE".to_string(),
-        path: path.clone(),
-        response: response_content,
-    };
-
-    ROUTES.lock().unwrap().push(route);
-    println!("DELETE route registered: {}", path);
+    register_route(scope, args, "DELETE");
 }
 
-async fn start_http_server(port: u16) -> Result<()> {
+async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) -> Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    println!("🌐 Binding HTTP server to address: {}", addr);
-
+    
     let make_svc =
         make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_request)) });
 
     let server = Server::bind(&addr).serve(make_svc);
-    println!("🎯 HTTP server bound successfully, starting to serve requests...");
-
-    if let Err(e) = server.await {
-        eprintln!("❌ HTTP server failed: {}", e);
+    eprintln!("HTTP server listening on http://127.0.0.1:{}", port);
+    
+    // Graceful shutdown with broadcast receiver
+    let graceful = server.with_graceful_shutdown(async {
+        let _ = shutdown_rx.recv().await;
+        eprintln!("Shutting down HTTP server on port {}", port);
+    });
+    
+    if let Err(e) = graceful.await {
+        eprintln!("Server error: {}", e);
         return Err(e.into());
     }
-
-    println!("✅ HTTP server completed successfully");
+    
     Ok(())
 }
 
@@ -275,17 +309,27 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
         let routes = ROUTES.lock().unwrap();
         for route in routes.iter() {
             if route.method == method && route.path == path {
-                return Ok(Response::builder()
-                    .header("content-type", "text/html")
-                    .body(Body::from(route.response.clone()))
-                    .unwrap());
+                if let Some(response) = &route.static_response {
+                    // Determine content type based on response content
+                    let content_type = if response.trim_start().starts_with('{') || response.trim_start().starts_with('[') {
+                        "application/json"
+                    } else {
+                        "text/plain"
+                    };
+                    
+                    return Ok(Response::builder()
+                        .header("content-type", content_type)
+                        .header("access-control-allow-origin", "*")  // CORS support
+                        .body(Body::from(response.clone()))
+                        .unwrap());
+                }
             }
         }
     }
 
     // Built-in routes
     let response = match (req.method(), path) {
-        (&Method::GET, "/") => Response::new(Body::from("Hello from Kiren HTTP Server! 🚀")),
+        (&Method::GET, "/") => Response::new(Body::from("Hello from Kiren HTTP Server")),
         (&Method::GET, "/health") => {
             let health = json!({
                 "status": "ok",

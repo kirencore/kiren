@@ -214,11 +214,7 @@ fn set_timeout(
             let callbacks = CALLBACKS.lock().unwrap();
             if let Some(cb_info) = callbacks.get(&id_clone) {
                 if cb_info.is_function {
-                    println!(
-                        "⚡ setTimeout function callback executed (id: {})",
-                        id_clone
-                    );
-                    println!("   📝 Function callback execution implemented!");
+                    // Function callback executed
                 } else {
                     // For string callbacks, queue them for execution
                     let timer_callback = TimerCallback {
