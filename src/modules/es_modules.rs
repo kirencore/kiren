@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use v8;
+use crate::package::{GlobalCache, UrlImportHandler};
 
 // ES Module resolver and loader
 pub struct ModuleLoader {
     module_map: Arc<Mutex<HashMap<String, v8::Global<v8::Module>>>>,
     base_path: PathBuf,
+    url_handler: Option<UrlImportHandler>,
 }
 
 impl ModuleLoader {
@@ -15,14 +17,29 @@ impl ModuleLoader {
         Self {
             module_map: Arc::new(Mutex::new(HashMap::new())),
             base_path: base_path.as_ref().to_path_buf(),
+            url_handler: None,
         }
     }
 
-    pub fn load_module(
-        &self,
+    pub fn with_url_support(base_path: impl AsRef<Path>, cache: GlobalCache) -> Self {
+        Self {
+            module_map: Arc::new(Mutex::new(HashMap::new())),
+            base_path: base_path.as_ref().to_path_buf(),
+            url_handler: Some(UrlImportHandler::new(cache)),
+        }
+    }
+
+    pub async fn load_module(
+        &mut self,
         scope: &mut v8::HandleScope,
         specifier: &str,
+        referrer: Option<&str>,
     ) -> Result<v8::Local<v8::Module>> {
+        // Check if this is a URL import
+        if self.is_url_import(specifier) {
+            return self.load_url_module(scope, specifier, referrer).await;
+        }
+
         let resolved_path = self.resolve_module_path(specifier)?;
         let module_key = resolved_path.to_string_lossy().to_string();
 
@@ -38,7 +55,7 @@ impl ModuleLoader {
         let source = std::fs::read_to_string(&resolved_path)
             .map_err(|e| anyhow::anyhow!("Failed to read module {}: {}", specifier, e))?;
 
-        let module = self.compile_module(scope, &source, &resolved_path)?;
+        let module = self.compile_module(scope, &source, &resolved_path.to_string_lossy())?;
 
         // Cache the compiled module
         {
@@ -48,6 +65,42 @@ impl ModuleLoader {
         }
 
         Ok(module)
+    }
+
+    async fn load_url_module(
+        &mut self,
+        scope: &mut v8::HandleScope,
+        specifier: &str,
+        referrer: Option<&str>,
+    ) -> Result<v8::Local<v8::Module>> {
+        if let Some(ref mut url_handler) = self.url_handler {
+            // Check if module is already cached
+            {
+                let module_map = self.module_map.lock().unwrap();
+                if let Some(global_module) = module_map.get(specifier) {
+                    return Ok(v8::Local::new(scope, global_module));
+                }
+            }
+
+            // Fetch URL module content
+            let source = url_handler.resolve_import(specifier, referrer).await?;
+            let module = self.compile_module(scope, &source, specifier)?;
+
+            // Cache the compiled module
+            {
+                let mut module_map = self.module_map.lock().unwrap();
+                let global_module = v8::Global::new(scope, module);
+                module_map.insert(specifier.to_string(), global_module);
+            }
+
+            Ok(module)
+        } else {
+            Err(anyhow::anyhow!("URL imports not supported - missing URL handler"))
+        }
+    }
+
+    fn is_url_import(&self, specifier: &str) -> bool {
+        specifier.starts_with("http://") || specifier.starts_with("https://")
     }
 
     fn resolve_module_path(&self, specifier: &str) -> Result<PathBuf> {
@@ -101,10 +154,10 @@ impl ModuleLoader {
         &self,
         scope: &mut v8::HandleScope,
         source: &str,
-        path: &Path,
+        path: &str,
     ) -> Result<v8::Local<v8::Module>> {
         let source_text = v8::String::new(scope, source).unwrap();
-        let resource_name = v8::String::new(scope, &path.to_string_lossy()).unwrap();
+        let resource_name = v8::String::new(scope, path).unwrap();
 
         let origin = v8::ScriptOrigin::new(
             scope,

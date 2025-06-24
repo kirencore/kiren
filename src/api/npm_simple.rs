@@ -55,24 +55,111 @@ fn simple_require(
     let module_path_str = module_path_arg.to_string(scope).unwrap();
     let module_path = module_path_str.to_rust_string_lossy(scope);
 
-    // Handle built-in modules
-    if let Some(builtin) = get_builtin_module(scope, &module_path) {
-        rv.set(builtin);
-        return;
-    }
-
-    // Try to load file-based modules
-    match load_simple_module(scope, &module_path) {
+    println!("Requiring module: {}", module_path);
+    
+    // Try to load file-based modules first (like Node.js)
+    match load_module_with_resolution(scope, &module_path) {
         Ok(module_exports) => {
+            println!("✓ Module loaded from file system: {}", module_path);
             rv.set(module_exports);
+            return;
         }
         Err(e) => {
-            let error_msg = format!("Cannot resolve module '{}': {}", module_path, e);
-            let error_str = v8::String::new(scope, &error_msg).unwrap();
-            let error = v8::Exception::error(scope, error_str);
-            scope.throw_exception(error);
+            println!("✗ File system load failed: {}", e);
+            // Fallback to built-in modules for core modules only
+            if let Some(builtin) = get_builtin_module(scope, &module_path) {
+                println!("✓ Using built-in module: {}", module_path);
+                rv.set(builtin);
+                return;
+            }
         }
     }
+
+    // If neither worked, throw error
+    let error_msg = format!("Cannot resolve module '{}'", module_path);
+    let error_str = v8::String::new(scope, &error_msg).unwrap();
+    let error = v8::Exception::error(scope, error_str);
+    scope.throw_exception(error);
+}
+
+fn load_module_with_resolution<'a>(scope: &mut v8::HandleScope<'a>, module_path: &str) -> Result<v8::Local<'a, v8::Value>> {
+    let current_dir = std::env::current_dir()?;
+    println!("Current directory: {}", current_dir.display());
+    
+    // Node.js style module resolution
+    if !module_path.starts_with("./") && !module_path.starts_with("../") && !module_path.starts_with("/") {
+        println!("Trying node_modules resolution for: {}", module_path);
+        // Try node_modules
+        if let Ok(result) = try_node_modules_resolution(scope, &current_dir, module_path) {
+            println!("✓ Found in node_modules");
+            return Ok(result);
+        }
+        println!("✗ Not found in node_modules");
+    }
+    
+    println!("Trying relative/absolute path resolution");
+    // Relative/absolute path resolution
+    load_simple_module(scope, module_path)
+}
+
+fn try_node_modules_resolution<'a>(
+    scope: &mut v8::HandleScope<'a>, 
+    current_dir: &std::path::Path, 
+    module_name: &str
+) -> Result<v8::Local<'a, v8::Value>> {
+    let node_modules_path = current_dir.join("node_modules").join(module_name);
+    println!("Looking for module at: {}", node_modules_path.display());
+    
+    // Try package.json main field
+    let package_json_path = node_modules_path.join("package.json");
+    println!("Checking package.json at: {}", package_json_path.display());
+    
+    if package_json_path.exists() {
+        println!("✓ package.json exists");
+        if let Ok(package_content) = fs::read_to_string(&package_json_path) {
+            println!("✓ package.json read successfully");
+            if let Ok(package_json) = serde_json::from_str::<serde_json::Value>(&package_content) {
+                println!("✓ package.json parsed successfully");
+                if let Some(main) = package_json.get("main").and_then(|v| v.as_str()) {
+                    println!("✓ Found main field: {}", main);
+                    let main_path = node_modules_path.join(main);
+                    println!("Checking main file at: {}", main_path.display());
+                    if main_path.exists() {
+                        println!("✓ Main file exists, reading...");
+                        let content = fs::read_to_string(&main_path)?;
+                        println!("✓ Main file content read, executing...");
+                        return execute_module_content(scope, &content);
+                    } else {
+                        println!("✗ Main file does not exist");
+                    }
+                } else {
+                    println!("✗ No main field in package.json");
+                }
+            } else {
+                println!("✗ Failed to parse package.json");
+            }
+        } else {
+            println!("✗ Failed to read package.json");
+        }
+    } else {
+        println!("✗ package.json does not exist");
+    }
+    
+    // Try index.js
+    let index_path = node_modules_path.join("index.js");
+    println!("Trying index.js at: {}", index_path.display());
+    if index_path.exists() {
+        let content = fs::read_to_string(&index_path)?;
+        return execute_module_content(scope, &content);
+    }
+    
+    // Try direct file
+    if node_modules_path.exists() && node_modules_path.is_file() {
+        let content = fs::read_to_string(&node_modules_path)?;
+        return execute_module_content(scope, &content);
+    }
+    
+    Err(anyhow::anyhow!("Module not found: {}", module_name))
 }
 
 fn get_builtin_module<'a>(scope: &mut v8::HandleScope<'a>, module_name: &str) -> Option<v8::Local<'a, v8::Value>> {
@@ -80,6 +167,7 @@ fn get_builtin_module<'a>(scope: &mut v8::HandleScope<'a>, module_name: &str) ->
         "fs" => Some(create_simple_fs_module(scope)),
         "path" => Some(create_simple_path_module(scope)),
         "os" => Some(create_simple_os_module(scope)),
+        "http" => Some(create_simple_http_module(scope)),
         _ => None,
     }
 }
@@ -132,6 +220,18 @@ fn create_simple_os_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a,
     os_obj.into()
 }
 
+fn create_simple_http_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
+    let http_obj = v8::Object::new(scope);
+    
+    // createServer
+    let create_server_key = v8::String::new(scope, "createServer").unwrap();
+    let create_server_template = v8::FunctionTemplate::new(scope, simple_create_server);
+    let create_server_fn = create_server_template.get_function(scope).unwrap();
+    http_obj.set(scope, create_server_key.into(), create_server_fn.into());
+
+    http_obj.into()
+}
+
 fn load_simple_module<'a>(scope: &mut v8::HandleScope<'a>, module_path: &str) -> Result<v8::Local<'a, v8::Value>> {
     let current_dir = std::env::current_dir()?;
     let full_path = if module_path.starts_with("./") || module_path.starts_with("../") {
@@ -162,7 +262,7 @@ fn load_simple_module<'a>(scope: &mut v8::HandleScope<'a>, module_path: &str) ->
 
 fn execute_module_content<'a>(scope: &mut v8::HandleScope<'a>, content: &str) -> Result<v8::Local<'a, v8::Value>> {
     // Create a simple module execution context
-    let exports_obj = v8::Object::new(scope);
+    let _exports_obj = v8::Object::new(scope);
     
     // Wrap the module code in a simple IIFE
     let wrapped_code = format!(
@@ -323,3 +423,44 @@ fn simple_os_platform(
     let result = v8::String::new(scope, platform).unwrap();
     rv.set(result.into());
 }
+
+fn simple_create_server(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Create a simple server object
+    let server_obj = v8::Object::new(scope);
+    
+    // listen method
+    let listen_key = v8::String::new(scope, "listen").unwrap();
+    let listen_template = v8::FunctionTemplate::new(scope, simple_server_listen);
+    let listen_fn = listen_template.get_function(scope).unwrap();
+    server_obj.set(scope, listen_key.into(), listen_fn.into());
+    
+    rv.set(server_obj.into());
+}
+
+fn simple_server_listen(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let port = if args.length() > 0 {
+        args.get(0).uint32_value(scope).unwrap_or(3000)
+    } else {
+        3000
+    };
+    
+    println!("HTTP server listening on port {}", port);
+    
+    // Execute callback if provided
+    if args.length() > 1 && args.get(1).is_function() {
+        let callback = v8::Local::<v8::Function>::try_from(args.get(1)).unwrap();
+        let undefined = v8::undefined(scope);
+        let callback_args = [];
+        callback.call(scope, undefined.into(), &callback_args);
+    }
+}
+
+// Express support removed - now using real module files

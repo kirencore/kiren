@@ -11,6 +11,7 @@ mod api;
 mod config;
 mod modules;
 mod runtime;
+mod package;
 use runtime::engine::Engine;
 use config::KirenConfig;
 use api::console;
@@ -75,6 +76,75 @@ async fn main() -> Result<()> {
                 .help("Suppress output")
                 .action(clap::ArgAction::SetTrue),
         )
+        .subcommand(
+            Command::new("init")
+                .about("Initialize a new Kiren project")
+                .arg(
+                    Arg::new("name")
+                        .help("Project name")
+                        .required(false)
+                        .index(1),
+                ),
+        )
+        .subcommand(
+            Command::new("install")
+                .about("Install dependencies from kiren.toml")
+                .alias("i"),
+        )
+        .subcommand(
+            Command::new("add")
+                .about("Add a package dependency")
+                .arg(
+                    Arg::new("package")
+                        .help("Package to add (name@version)")
+                        .required(true)
+                        .index(1),
+                )
+                .arg(
+                    Arg::new("dev")
+                        .long("dev")
+                        .short('D')
+                        .help("Add as dev dependency")
+                        .action(clap::ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(
+            Command::new("remove")
+                .about("Remove a package dependency")
+                .alias("rm")
+                .arg(
+                    Arg::new("package")
+                        .help("Package to remove")
+                        .required(true)
+                        .index(1),
+                ),
+        )
+        .subcommand(
+            Command::new("search")
+                .about("Search for packages")
+                .arg(
+                    Arg::new("query")
+                        .help("Search query")
+                        .required(true)
+                        .index(1),
+                ),
+        )
+        .subcommand(
+            Command::new("cache")
+                .about("Manage package cache")
+                .subcommand(Command::new("clean").about("Clean old packages from cache"))
+                .subcommand(Command::new("stats").about("Show cache statistics")),
+        )
+        .subcommand(
+            Command::new("test")
+                .about("Run test files")
+                .arg(
+                    Arg::new("pattern")
+                        .help("Test file pattern (e.g., test-*.js)")
+                        .required(false)
+                        .index(1),
+                ),
+        )
         .get_matches();
 
     // Load configuration
@@ -110,6 +180,32 @@ async fn main() -> Result<()> {
     // Configure console logging
     console::configure_console(verbose, silent);
 
+    // Handle package manager subcommands
+    match matches.subcommand() {
+        Some(("init", sub_matches)) => {
+            return handle_init_command(sub_matches).await;
+        }
+        Some(("install", _)) | Some(("i", _)) => {
+            return handle_install_command().await;
+        }
+        Some(("add", sub_matches)) => {
+            return handle_add_command(sub_matches).await;
+        }
+        Some(("remove", sub_matches)) | Some(("rm", sub_matches)) => {
+            return handle_remove_command(sub_matches).await;
+        }
+        Some(("search", sub_matches)) => {
+            return handle_search_command(sub_matches).await;
+        }
+        Some(("cache", sub_matches)) => {
+            return handle_cache_command(sub_matches).await;
+        }
+        Some(("test", sub_matches)) => {
+            return handle_test_command(sub_matches).await;
+        }
+        _ => {}
+    }
+
     if matches.get_flag("repl") || matches.get_one::<String>("file").is_none() {
         run_repl_with_config(&config).await?;
     } else if let Some(filename) = matches.get_one::<String>("file") {
@@ -130,7 +226,7 @@ async fn execute_file(filename: &str) -> Result<()> {
     // Check file extension to determine execution mode
     let is_module = filename.ends_with(".mjs") || 
                    filename.ends_with(".esm.js") ||
-                   source.trim_start().starts_with("import ") ||
+                   source.contains("import ") ||
                    source.contains("export ");
 
     let result = if is_module {
@@ -153,10 +249,10 @@ async fn execute_file(filename: &str) -> Result<()> {
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
                 // Keep the process alive for HTTP server
-                let mut counter = 0;
+                let mut _counter = 0;
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                    counter += 1;
+                    _counter += 1;
 
                     // Process timer callbacks
                     if let Err(e) = engine.execute_with_callbacks("", true) {
@@ -285,15 +381,15 @@ async fn run_repl() -> Result<()> {
     Ok(())
 }
 
-async fn execute_file_with_config(filename: &str, config: &KirenConfig) -> Result<()> {
+async fn execute_file_with_config(filename: &str, _config: &KirenConfig) -> Result<()> {
     execute_file(filename).await
 }
 
-async fn run_repl_with_config(config: &KirenConfig) -> Result<()> {
+async fn run_repl_with_config(_config: &KirenConfig) -> Result<()> {
     run_repl().await
 }
 
-async fn run_watch_mode_with_config(filename: &str, config: &KirenConfig) -> Result<()> {
+async fn run_watch_mode_with_config(filename: &str, _config: &KirenConfig) -> Result<()> {
     run_watch_mode(filename).await
 }
 
@@ -303,7 +399,7 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
     // Check file extension to determine execution mode
     let is_module = filename.ends_with(".mjs") || 
                    filename.ends_with(".esm.js") ||
-                   source.trim_start().starts_with("import ") ||
+                   source.contains("import ") ||
                    source.contains("export ");
 
     let result = if is_module {
@@ -405,5 +501,205 @@ async fn run_watch_mode(filename: &str) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+// Package Manager Command Handlers
+
+async fn handle_init_command(matches: &clap::ArgMatches) -> Result<()> {
+    let project_name = matches.get_one::<String>("name")
+        .map(|s| s.as_str())
+        .unwrap_or_else(|| {
+            "kiren-app"
+        });
+
+    let current_dir = std::env::current_dir()?;
+    
+    
+    package::KirenPackageManager::init(&current_dir, project_name).await?;
+    
+    
+    Ok(())
+}
+
+async fn handle_install_command() -> Result<()> {
+    let current_dir = std::env::current_dir()?;
+    
+    
+    let package_manager = package::KirenPackageManager::new()?;
+    let _packages = package_manager.install(&current_dir).await?;
+    
+    
+    Ok(())
+}
+
+async fn handle_add_command(matches: &clap::ArgMatches) -> Result<()> {
+    let package_spec = matches.get_one::<String>("package").unwrap();
+    let is_dev = matches.get_flag("dev");
+    
+    
+    let package_manager = package::KirenPackageManager::new()?;
+    let resolved_package = package_manager.resolve(package_spec).await?;
+    
+    // Update kiren.toml
+    let current_dir = std::env::current_dir()?;
+    let config_path = current_dir.join("kiren.toml");
+    
+    if config_path.exists() {
+        let content = tokio::fs::read_to_string(&config_path).await?;
+        let mut config: package::ProjectConfig = toml::from_str(&content)?;
+        
+        if is_dev {
+            config.add_dev_dependency(&resolved_package.package.name, &resolved_package.package.version);
+        } else {
+            config.add_dependency(&resolved_package.package.name, &resolved_package.package.version);
+        }
+        
+        let updated_content = config.to_toml()?;
+        tokio::fs::write(&config_path, updated_content).await?;
+        
+    } else {
+        return Err(anyhow::anyhow!("No kiren.toml found"));
+    }
+    
+    Ok(())
+}
+
+async fn handle_remove_command(matches: &clap::ArgMatches) -> Result<()> {
+    let package_name = matches.get_one::<String>("package").unwrap();
+    
+    
+    // Update kiren.toml
+    let current_dir = std::env::current_dir()?;
+    let config_path = current_dir.join("kiren.toml");
+    
+    if config_path.exists() {
+        let content = tokio::fs::read_to_string(&config_path).await?;
+        let mut config: package::ProjectConfig = toml::from_str(&content)?;
+        
+        let removed_from_deps = config.dependencies.remove(package_name).is_some();
+        let removed_from_dev = config.dev_dependencies.remove(package_name).is_some();
+        
+        if removed_from_deps || removed_from_dev {
+            let updated_content = config.to_toml()?;
+            tokio::fs::write(&config_path, updated_content).await?;
+            
+        } else {
+        }
+    } else {
+        return Err(anyhow::anyhow!("No kiren.toml found"));
+    }
+    
+    Ok(())
+}
+
+async fn handle_search_command(matches: &clap::ArgMatches) -> Result<()> {
+    let query = matches.get_one::<String>("query").unwrap();
+    
+    
+    let _package_manager = package::KirenPackageManager::new()?;
+    let registry = package::KirenRegistry::new("https://registry.kiren.dev".to_string());
+    
+    let results = registry.search(query).await?;
+    
+    if results.is_empty() {
+        println!("No packages found matching '{}'", query);
+    } else {
+        println!("Found {} package(s):", results.len());
+        for package in results {
+            println!("  {}", package);
+        }
+        println!();
+        println!("Add a package: kiren add <package>@<version>");
+    }
+    
+    Ok(())
+}
+
+async fn handle_cache_command(matches: &clap::ArgMatches) -> Result<()> {
+    let _package_manager = package::KirenPackageManager::new()?;
+    let cache = package::GlobalCache::new(
+        dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+            .join(".kiren")
+            .join("cache")
+    )?;
+    
+    match matches.subcommand() {
+        Some(("clean", _)) => {
+            cache.clean(30).await?; // Clean packages older than 30 days
+        }
+        Some(("stats", _)) => {
+            let stats = cache.stats().await?;
+            stats.print();
+        }
+        _ => {
+            println!("Available cache commands:");
+            println!("  kiren cache clean  - Clean old packages");
+            println!("  kiren cache stats  - Show cache statistics");
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_test_command(matches: &clap::ArgMatches) -> Result<()> {
+    let pattern = matches.get_one::<String>("pattern")
+        .map(|s| s.as_str())
+        .unwrap_or("test-*.js");
+    
+    let current_dir = std::env::current_dir()?;
+    let test_dir = current_dir.join("tests");
+    
+    if !test_dir.exists() {
+        println!("No tests directory found. Creating tests/...");
+        std::fs::create_dir_all(&test_dir)?;
+        println!("Place your test files in the tests/ directory.");
+        return Ok(());
+    }
+    
+    // Find test files
+    let mut test_files = Vec::new();
+    for entry in std::fs::read_dir(&test_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(file_name) = path.file_name() {
+                let name = file_name.to_string_lossy();
+                if name.ends_with(".js") && (pattern == "test-*.js" && name.starts_with("test-") || name.contains(pattern)) {
+                    test_files.push(path);
+                }
+            }
+        }
+    }
+    
+    if test_files.is_empty() {
+        println!("No test files found matching pattern: {}", pattern);
+        return Ok(());
+    }
+    
+    println!("Running {} test file(s)...\n", test_files.len());
+    
+    // Execute each test file
+    for test_file in test_files {
+        println!("Running: {}", test_file.display());
+        
+        let mut engine = Engine::new()?;
+        let source = std::fs::read_to_string(&test_file)?;
+        
+        match engine.execute(&source) {
+            Ok(_) => {
+                println!("✅ {} completed", test_file.file_name().unwrap().to_string_lossy());
+            }
+            Err(e) => {
+                println!("❌ {} failed: {}", test_file.file_name().unwrap().to_string_lossy(), e);
+            }
+        }
+        println!();
+    }
+    
+    // Print test summary
+    crate::api::test::print_test_summary();
+    
     Ok(())
 }

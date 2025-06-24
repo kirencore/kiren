@@ -1,4 +1,4 @@
-use crate::api::{environment, fetch, filesystem, http, process, timers};
+use crate::api::{environment, fetch, filesystem, http, process, test, timers};
 use anyhow::Result;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -42,9 +42,11 @@ impl Engine {
         self.execute_with_callbacks(source, true)
     }
 
-    pub fn execute_module(&mut self, source: &str, module_name: &str) -> Result<String> {
+    pub fn execute_module(&mut self, source: &str, _module_name: &str) -> Result<String> {
         // Static import'ları dynamic import'a dönüştür
         let transformed_source = self.transform_static_imports(source);
+        println!("Original source:\n{}", source);
+        println!("Transformed source:\n{}", transformed_source);
         
         
         // Normal execute ile çalıştır ama module context'te
@@ -92,12 +94,14 @@ impl Engine {
         crate::api::console::setup_console(scope, context)?;
         crate::api::errors::setup_error_handling(scope, context)?;
         crate::api::npm_simple::setup_npm_compatibility(scope, context)?;
+        crate::api::express::setup_express(scope, context)?;
         timers::setup_timers(scope, context)?;
         fetch::setup_fetch(scope, context)?;
         filesystem::setup_filesystem(scope, context)?;
         process::setup_process(scope, context)?;
         environment::setup_environment(scope, context)?;
         http::setup_http(scope, context)?;
+        test::setup_test_framework(scope, context)?;
         crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
         crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
 
@@ -176,9 +180,11 @@ impl Engine {
         // Setup all APIs
         timers::setup_timers(scope, context)?;
         fetch::setup_fetch(scope, context)?;
+        test::setup_test_framework(scope, context)?;
         filesystem::setup_filesystem(scope, context)?;
         process::setup_process(scope, context)?;
         http::setup_http(scope, context)?;
+        test::setup_test_framework(scope, context)?;
         crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
         crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
 
