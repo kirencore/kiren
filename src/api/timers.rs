@@ -15,6 +15,7 @@ static TIMERS: Lazy<DashMap<String, JoinHandle<()>>> = Lazy::new(|| DashMap::new
 struct CallbackInfo {
     callback_source: String,
     is_function: bool,
+    function_source: Option<String>, // Store serialized function for execution
 }
 
 static CALLBACKS: Lazy<Arc<Mutex<DashMap<String, CallbackInfo>>>> =
@@ -26,6 +27,7 @@ struct TimerCallback {
     id: String,
     callback_source: String,
     is_function: bool,
+    function_source: Option<String>,
 }
 
 static CALLBACK_QUEUE: Lazy<Arc<Mutex<Vec<TimerCallback>>>> =
@@ -70,9 +72,15 @@ pub fn process_timer_callbacks(scope: &mut v8::HandleScope) -> Result<()> {
     // Process each callback
     for callback in callbacks_to_process {
         if callback.is_function {
-            // For function callbacks, we need to implement proper callback execution
-            println!("⚡ Timer callback executed (id: {})", callback.id);
-            println!("   📝 Function callback execution implemented!");
+            // For function callbacks, execute the stored function source
+            if let Some(ref function_source) = callback.function_source {
+                if let Err(e) = execute_function_callback(scope, &callback, function_source) {
+                    println!("❌ Timer function callback error: {}", e);
+                }
+            } else {
+                println!("⚡ Timer callback executed (id: {})", callback.id);
+                println!("   📝 Function callback (no source available)");
+            }
         } else {
             // For string callbacks, execute them in proper scope
             if let Err(e) = execute_string_callback(scope, &callback) {
@@ -161,6 +169,72 @@ fn execute_string_callback(scope: &mut v8::HandleScope, callback: &TimerCallback
     Ok(())
 }
 
+// Execute function callback in proper scope
+fn execute_function_callback(scope: &mut v8::HandleScope, callback: &TimerCallback, function_source: &str) -> Result<()> {
+    // Get the current context
+    let context = scope.get_current_context();
+    let scope = &mut v8::ContextScope::new(scope, context);
+
+    // Create a wrapper that calls the function
+    let wrapper_source = format!("({})()", function_source);
+    let source_string = v8::String::new(scope, &wrapper_source).unwrap();
+    let filename = v8::String::new(scope, &format!("timer-function-{}", callback.id)).unwrap();
+
+    // Create script origin for better error reporting
+    let undefined_val = v8::undefined(scope);
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        filename.into(),
+        0,                    // line_offset
+        0,                    // column_offset
+        false,                // is_shared_cross_origin
+        0,                    // script_id
+        undefined_val.into(), // source_map_url
+        false,                // is_opaque
+        false,                // is_wasm
+        false,                // is_module
+    );
+
+    // Use TryCatch for better error handling
+    let mut try_catch = v8::TryCatch::new(scope);
+
+    match v8::Script::compile(&mut try_catch, source_string, Some(&origin)) {
+        Some(script) => match script.run(&mut try_catch) {
+            Some(_) => {
+                println!("⚡ Timer function callback executed (id: {})", callback.id);
+            }
+            None => {
+                if try_catch.has_caught() {
+                    if let Some(exception) = try_catch.exception() {
+                        let exc_str = exception.to_string(&mut try_catch).unwrap();
+                        let error_msg = exc_str.to_rust_string_lossy(&mut try_catch);
+                        println!("❌ Timer function callback runtime error: {}", error_msg);
+                    } else {
+                        println!("❌ Timer function callback execution failed: {}", callback.id);
+                    }
+                } else {
+                    println!("❌ Timer function callback execution failed: {}", callback.id);
+                }
+            }
+        },
+        None => {
+            if try_catch.has_caught() {
+                if let Some(exception) = try_catch.exception() {
+                    let exc_str = exception.to_string(&mut try_catch).unwrap();
+                    let error_msg = exc_str.to_rust_string_lossy(&mut try_catch);
+                    println!("❌ Timer function callback compilation error: {}", error_msg);
+                } else {
+                    println!("❌ Timer function callback compilation failed: {}", callback.id);
+                }
+            } else {
+                println!("❌ Timer function callback compilation failed: {}", callback.id);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn set_timeout(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -181,11 +255,13 @@ fn set_timeout(
 
     // Store callback info safely
     let callback_info = if callback.is_function() {
-        // For now, we can't safely execute V8 functions from other threads
-        // So we'll store a placeholder and print a message when timer fires
+        // Serialize function to string for later execution
+        let callback_str = callback.to_string(scope).unwrap();
+        let source = callback_str.to_rust_string_lossy(scope);
         CallbackInfo {
             callback_source: "function() { /* callback */ }".to_string(),
             is_function: true,
+            function_source: Some(source),
         }
     } else if callback.is_string() {
         // If it's a string, we could potentially eval it later
@@ -194,6 +270,7 @@ fn set_timeout(
         CallbackInfo {
             callback_source: source,
             is_function: false,
+            function_source: None,
         }
     } else {
         return; // Invalid callback type
@@ -214,13 +291,27 @@ fn set_timeout(
             let callbacks = CALLBACKS.lock().unwrap();
             if let Some(cb_info) = callbacks.get(&id_clone) {
                 if cb_info.is_function {
-                    // Function callback executed
+                    // Queue function callback for execution
+                    let timer_callback = TimerCallback {
+                        id: id_clone.clone(),
+                        callback_source: cb_info.callback_source.clone(),
+                        is_function: cb_info.is_function,
+                        function_source: cb_info.function_source.clone(),
+                    };
+
+                    // Add to callback queue
+                    {
+                        let mut queue = CALLBACK_QUEUE.lock().unwrap();
+                        queue.push(timer_callback);
+                    }
+                    println!("⚡ setTimeout function callback queued (id: {})", id_clone);
                 } else {
                     // For string callbacks, queue them for execution
                     let timer_callback = TimerCallback {
                         id: id_clone.clone(),
                         callback_source: cb_info.callback_source.clone(),
                         is_function: cb_info.is_function,
+                        function_source: cb_info.function_source.clone(),
                     };
 
                     // Add to callback queue
@@ -285,9 +376,13 @@ fn set_interval(
 
     // Store callback info safely
     let callback_info = if callback.is_function() {
+        // Serialize function to string for later execution
+        let callback_str = callback.to_string(scope).unwrap();
+        let source = callback_str.to_rust_string_lossy(scope);
         CallbackInfo {
             callback_source: "function() { /* interval callback */ }".to_string(),
             is_function: true,
+            function_source: Some(source),
         }
     } else if callback.is_string() {
         let callback_str = callback.to_string(scope).unwrap();
@@ -295,6 +390,7 @@ fn set_interval(
         CallbackInfo {
             callback_source: source,
             is_function: false,
+            function_source: None,
         }
     } else {
         return;
@@ -320,23 +416,36 @@ fn set_interval(
                 let callbacks = CALLBACKS.lock().unwrap();
                 callbacks
                     .get(&interval_id)
-                    .map(|cb_info| (cb_info.is_function, cb_info.callback_source.clone()))
+                    .map(|cb_info| (cb_info.is_function, cb_info.callback_source.clone(), cb_info.function_source.clone()))
             };
 
             let should_continue = match callback_data {
-                Some((is_function, callback_source)) => {
+                Some((is_function, callback_source, function_source)) => {
                     if is_function {
+                        // Queue function callback for execution
+                        let timer_callback = TimerCallback {
+                            id: format!("{}-{}", interval_id, count),
+                            callback_source: callback_source.clone(),
+                            is_function,
+                            function_source: function_source.clone(),
+                        };
+
+                        // Add to callback queue
+                        {
+                            let mut queue = CALLBACK_QUEUE.lock().unwrap();
+                            queue.push(timer_callback);
+                        }
                         println!(
-                            "🔄 setInterval function callback #{} executed (id: {})",
+                            "🔄 setInterval function callback #{} queued (id: {})",
                             count, interval_id
                         );
-                        println!("   📝 Function callback execution implemented!");
                     } else {
                         // For string callbacks, queue them for execution
                         let timer_callback = TimerCallback {
                             id: format!("{}-{}", interval_id, count),
                             callback_source: callback_source.clone(),
                             is_function,
+                            function_source: function_source.clone(),
                         };
 
                         // Add to callback queue

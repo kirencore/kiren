@@ -1,4 +1,4 @@
-use crate::api::{buffer, environment, events, fetch, filesystem, http, process, test, timers};
+use crate::api::{buffer, environment, events, fetch, filesystem, http, process, streams, test, timers};
 use anyhow::Result;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -100,6 +100,7 @@ impl Engine {
         fetch::setup_fetch(scope, context)?;
         buffer::initialize_buffer_api(scope, global)?;
         events::initialize_events_api(scope, global)?;
+        streams::initialize_streams_api(scope, global)?;
         filesystem::setup_filesystem(scope, context)?;
         process::setup_process(scope, context)?;
         environment::setup_environment(scope, context)?;

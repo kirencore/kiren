@@ -11,5 +11,6 @@ pub mod npm_simple;
 pub mod process;
 pub mod request_response;
 pub mod static_files;
+pub mod streams;
 pub mod test;
 pub mod timers;
