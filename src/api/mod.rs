@@ -1,6 +1,8 @@
+pub mod buffer;
 pub mod console;
 pub mod environment;
 pub mod errors;
+pub mod events;
 pub mod express;
 pub mod fetch;
 pub mod filesystem;

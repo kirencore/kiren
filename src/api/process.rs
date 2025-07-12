@@ -59,7 +59,6 @@ impl ProcessState {
 }
 
 pub fn setup_process(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
-    println!("Setting up process API...");
     let global = context.global(scope);
 
     // Create process object
@@ -74,8 +73,8 @@ pub fn setup_process(scope: &mut v8::HandleScope, context: v8::Local<v8::Context
 
     global.set(scope, process_key.into(), process_obj.into());
 
-    // Start signal listeners
-    start_signal_listeners();
+    // Start signal listeners - disabled for now to avoid infinite loop
+    // start_signal_listeners();
 
     Ok(())
 }
@@ -84,7 +83,6 @@ fn add_process_properties(
     scope: &mut v8::HandleScope,
     process_obj: &v8::Local<v8::Object>,
 ) -> Result<()> {
-    println!("Adding process properties...");
     let state = PROCESS_STATE.lock().unwrap();
     
     // process.pid
@@ -139,7 +137,6 @@ fn add_process_methods(
     scope: &mut v8::HandleScope,
     process_obj: &v8::Local<v8::Object>,
 ) -> Result<()> {
-    println!("Adding process methods (including cwd)...");
     // process.exit()
     let exit_key = v8::String::new(scope, "exit").unwrap();
     let exit_fn = v8::FunctionTemplate::new(scope, process_exit);

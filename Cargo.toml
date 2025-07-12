@@ -45,6 +45,9 @@ dirs = "5.0"
 rand = "0.8"
 urlencoding = "2.1"
 ada-url = "2.0"
+base64 = "0.21"
+hex = "0.4"
+lazy_static = "1.4"
 
 [dev-dependencies]
 tokio-test = "0.4"

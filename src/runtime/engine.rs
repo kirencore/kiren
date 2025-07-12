@@ -1,4 +1,4 @@
-use crate::api::{environment, fetch, filesystem, http, process, test, timers};
+use crate::api::{buffer, environment, events, fetch, filesystem, http, process, test, timers};
 use anyhow::Result;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -89,6 +89,7 @@ impl Engine {
         // Fast context creation
         let context = v8::Context::new(scope);
         let scope = &mut v8::ContextScope::new(scope, context);
+        let global = context.global(scope);
 
         // Setup all APIs - simplified for now
         crate::api::console::setup_console(scope, context)?;
@@ -97,6 +98,8 @@ impl Engine {
         crate::api::express::setup_express(scope, context)?;
         timers::setup_timers(scope, context)?;
         fetch::setup_fetch(scope, context)?;
+        buffer::initialize_buffer_api(scope, global)?;
+        events::initialize_events_api(scope, global)?;
         filesystem::setup_filesystem(scope, context)?;
         process::setup_process(scope, context)?;
         environment::setup_environment(scope, context)?;
@@ -151,43 +154,8 @@ impl Engine {
         }
     }
 
-    fn setup_apis(&mut self, scope: &mut v8::ContextScope<v8::HandleScope>, context: v8::Local<v8::Context>) -> Result<()> {
-        // Console API implementation
-        let global = context.global(scope);
-        let console_key = v8::String::new(scope, "console").unwrap();
-        let console_obj = v8::Object::new(scope);
-
-        // console.log
-        let log_key = v8::String::new(scope, "log").unwrap();
-        let log_tmpl = v8::FunctionTemplate::new(scope, console_log);
-        let log_func = log_tmpl.get_function(scope).unwrap();
-        console_obj.set(scope, log_key.into(), log_func.into());
-
-        // console.time
-        let time_key = v8::String::new(scope, "time").unwrap();
-        let time_tmpl = v8::FunctionTemplate::new(scope, console_time);
-        let time_func = time_tmpl.get_function(scope).unwrap();
-        console_obj.set(scope, time_key.into(), time_func.into());
-
-        // console.timeEnd
-        let time_end_key = v8::String::new(scope, "timeEnd").unwrap();
-        let time_end_tmpl = v8::FunctionTemplate::new(scope, console_time_end);
-        let time_end_func = time_end_tmpl.get_function(scope).unwrap();
-        console_obj.set(scope, time_end_key.into(), time_end_func.into());
-
-        global.set(scope, console_key.into(), console_obj.into());
-
-        // Setup all APIs
-        timers::setup_timers(scope, context)?;
-        fetch::setup_fetch(scope, context)?;
-        test::setup_test_framework(scope, context)?;
-        filesystem::setup_filesystem(scope, context)?;
-        process::setup_process(scope, context)?;
-        http::setup_http(scope, context)?;
-        test::setup_test_framework(scope, context)?;
-        crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
-        crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
-
+    // This function is not used anymore - all setup is done in execute_with_callbacks
+    fn _unused_setup_apis(&mut self, scope: &mut v8::ContextScope<v8::HandleScope>, context: v8::Local<v8::Context>) -> Result<()> {
         Ok(())
     }
 

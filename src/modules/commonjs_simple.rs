@@ -1,5 +1,6 @@
 use anyhow::Result;
 use v8;
+use std::collections::HashMap;
 
 // Simplified CommonJS support
 pub fn setup_commonjs(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
@@ -83,7 +84,34 @@ fn global_require(
         }
         "http" => {
             let http_obj = v8::Object::new(scope);
+            
+            // Add createServer function
+            let create_server_key = v8::String::new(scope, "createServer").unwrap();
+            let create_server_tmpl = v8::FunctionTemplate::new(scope, http_create_server);
+            let create_server_fn = create_server_tmpl.get_function(scope).unwrap();
+            http_obj.set(scope, create_server_key.into(), create_server_fn.into());
+            
             rv.set(http_obj.into());
+            return;
+        }
+        "express" => {
+            // Create express function that returns an app
+            let express_tmpl = v8::FunctionTemplate::new(scope, express_create_app);
+            let express_fn = express_tmpl.get_function(scope).unwrap();
+            
+            // Add static Router property
+            let router_key = v8::String::new(scope, "Router").unwrap();
+            let router_tmpl = v8::FunctionTemplate::new(scope, express_create_router);
+            let router_fn = router_tmpl.get_function(scope).unwrap();
+            express_fn.set(scope, router_key.into(), router_fn.into());
+            
+            // Add static static property
+            let static_key = v8::String::new(scope, "static").unwrap();
+            let static_tmpl = v8::FunctionTemplate::new(scope, express_create_static);
+            let static_fn = static_tmpl.get_function(scope).unwrap();
+            express_fn.set(scope, static_key.into(), static_fn.into());
+            
+            rv.set(express_fn.into());
             return;
         }
         _ => {
@@ -169,4 +197,279 @@ fn fs_exists_sync(
     let exists = std::path::Path::new(&path).exists();
     let exists_val = v8::Boolean::new(scope, exists);
     rv.set(exists_val.into());
+}
+
+// HTTP module implementation for CommonJS
+fn http_create_server(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Create server object
+    let server_obj = v8::Object::new(scope);
+    
+    // Store the callback function if provided
+    if args.length() > 0 {
+        let callback = args.get(0);
+        let callback_key = v8::String::new(scope, "_requestCallback").unwrap();
+        server_obj.set(scope, callback_key.into(), callback);
+    }
+    
+    // Add listen method
+    let listen_key = v8::String::new(scope, "listen").unwrap();
+    let listen_tmpl = v8::FunctionTemplate::new(scope, http_server_listen);
+    let listen_fn = listen_tmpl.get_function(scope).unwrap();
+    server_obj.set(scope, listen_key.into(), listen_fn.into());
+    
+    rv.set(server_obj.into());
+}
+
+fn http_server_listen(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    if args.length() == 0 {
+        return;
+    }
+    
+    let port_arg = args.get(0);
+    let port_str = port_arg.to_string(scope).unwrap();
+    let port = port_str.to_rust_string_lossy(scope);
+    
+    // Call the callback if provided (second argument)
+    if args.length() > 1 {
+        let callback = args.get(1);
+        if callback.is_function() {
+            let callback_fn: v8::Local<v8::Function> = callback.try_into().unwrap();
+            let this_obj = args.this();
+            let no_args = [];
+            let _ = callback_fn.call(scope, this_obj.into(), &no_args);
+        }
+    }
+    
+    println!("HTTP Server listening on port {}", port);
+}
+
+// Express module implementation for CommonJS
+fn express_create_app(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Create app object
+    let app_obj = v8::Object::new(scope);
+
+    // Add HTTP methods
+    let get_key = v8::String::new(scope, "get").unwrap();
+    let get_template = v8::FunctionTemplate::new(scope, express_app_get);
+    let get_function = get_template.get_function(scope).unwrap();
+    app_obj.set(scope, get_key.into(), get_function.into());
+
+    let post_key = v8::String::new(scope, "post").unwrap();
+    let post_template = v8::FunctionTemplate::new(scope, express_app_post);
+    let post_function = post_template.get_function(scope).unwrap();
+    app_obj.set(scope, post_key.into(), post_function.into());
+
+    let put_key = v8::String::new(scope, "put").unwrap();
+    let put_template = v8::FunctionTemplate::new(scope, express_app_put);
+    let put_function = put_template.get_function(scope).unwrap();
+    app_obj.set(scope, put_key.into(), put_function.into());
+
+    let delete_key = v8::String::new(scope, "delete").unwrap();
+    let delete_template = v8::FunctionTemplate::new(scope, express_app_delete);
+    let delete_function = delete_template.get_function(scope).unwrap();
+    app_obj.set(scope, delete_key.into(), delete_function.into());
+
+    // Add use method for middleware
+    let use_key = v8::String::new(scope, "use").unwrap();
+    let use_template = v8::FunctionTemplate::new(scope, express_app_use);
+    let use_function = use_template.get_function(scope).unwrap();
+    app_obj.set(scope, use_key.into(), use_function.into());
+
+    // Add listen method
+    let listen_key = v8::String::new(scope, "listen").unwrap();
+    let listen_template = v8::FunctionTemplate::new(scope, express_app_listen);
+    let listen_function = listen_template.get_function(scope).unwrap();
+    app_obj.set(scope, listen_key.into(), listen_function.into());
+
+    rv.set(app_obj.into());
+}
+
+fn express_create_router(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Create router object (similar to app for now)
+    let router_obj = v8::Object::new(scope);
+
+    // Add HTTP methods
+    let get_key = v8::String::new(scope, "get").unwrap();
+    let get_template = v8::FunctionTemplate::new(scope, express_app_get);
+    let get_function = get_template.get_function(scope).unwrap();
+    router_obj.set(scope, get_key.into(), get_function.into());
+
+    let post_key = v8::String::new(scope, "post").unwrap();
+    let post_template = v8::FunctionTemplate::new(scope, express_app_post);
+    let post_function = post_template.get_function(scope).unwrap();
+    router_obj.set(scope, post_key.into(), post_function.into());
+
+    rv.set(router_obj.into());
+}
+
+fn express_create_static(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    if args.length() == 0 {
+        let error = v8::String::new(scope, "express.static() requires a root directory").unwrap();
+        let exception = v8::Exception::type_error(scope, error);
+        scope.throw_exception(exception);
+        return;
+    }
+
+    let root_arg = args.get(0);
+    let root_str = root_arg.to_string(scope).unwrap();
+    let root_path = root_str.to_rust_string_lossy(scope);
+
+    // Create a middleware function that serves static files
+    let middleware_fn = v8::FunctionTemplate::new(scope, express_static_middleware);
+    let middleware = middleware_fn.get_function(scope).unwrap();
+
+    // Store root path in middleware function
+    let root_key = v8::String::new(scope, "_staticRoot").unwrap();
+    let root_value = v8::String::new(scope, &root_path).unwrap();
+    middleware.set(scope, root_key.into(), root_value.into());
+
+    rv.set(middleware.into());
+}
+
+fn express_static_middleware(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    // Static middleware handler
+    if args.length() < 3 {
+        return;
+    }
+
+    let req = args.get(0);
+    let _res = args.get(1);
+    let next = args.get(2);
+
+    // Extract URL from request
+    if let Ok(req_obj) = v8::Local::<v8::Object>::try_from(req) {
+        let url_key = v8::String::new(scope, "url").unwrap();
+        if let Some(url_val) = req_obj.get(scope, url_key.into()) {
+            let url_str = url_val.to_string(scope).unwrap();
+            let url = url_str.to_rust_string_lossy(scope);
+            
+            println!("Static middleware handling: {}", url);
+            
+            // Call next() to continue
+            if let Ok(next_fn) = v8::Local::<v8::Function>::try_from(next) {
+                let undefined = v8::undefined(scope);
+                next_fn.call(scope, undefined.into(), &[]);
+            }
+        }
+    }
+}
+
+// Express app method implementations
+fn express_app_get(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    express_register_route(scope, args, "GET");
+}
+
+fn express_app_post(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    express_register_route(scope, args, "POST");
+}
+
+fn express_app_put(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    express_register_route(scope, args, "PUT");
+}
+
+fn express_app_delete(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    express_register_route(scope, args, "DELETE");
+}
+
+fn express_app_use(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    if args.length() == 0 {
+        return;
+    }
+    
+    let _path_pattern = if args.length() == 1 {
+        // app.use(middleware) - global middleware
+        "*".to_string()
+    } else {
+        // app.use(path, middleware) - path-specific middleware
+        let path_arg = args.get(0);
+        let path_str = path_arg.to_string(scope).unwrap();
+        path_str.to_rust_string_lossy(scope)
+    };
+    
+    println!("Middleware registered");
+}
+
+fn express_app_listen(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    let port = if args.length() > 0 {
+        args.get(0).uint32_value(scope).unwrap_or(3000)
+    } else {
+        3000
+    };
+
+    // Call the callback if provided (second argument)
+    if args.length() > 1 {
+        let callback = args.get(1);
+        if callback.is_function() {
+            let callback_fn: v8::Local<v8::Function> = callback.try_into().unwrap();
+            let this_obj = args.this();
+            let no_args = [];
+            let _ = callback_fn.call(scope, this_obj.into(), &no_args);
+        }
+    }
+
+    println!("Express server listening on port {}", port);
+}
+
+fn express_register_route(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    method: &str,
+) {
+    if args.length() < 2 {
+        return;
+    }
+
+    let path_arg = args.get(0);
+    let path_str = path_arg.to_string(scope).unwrap();
+    let path = path_str.to_rust_string_lossy(scope);
+
+    println!("Express route registered: {} {}", method, path);
 }
