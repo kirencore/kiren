@@ -110,9 +110,44 @@ fn promise_rejection_handler(
     eprintln!("{}", error_info.stack);
 }
 
-fn generate_stack_trace(_scope: &mut v8::HandleScope) -> String {
-    // Simplified stack trace generation
-    "    at <anonymous>".to_string()
+fn generate_stack_trace(scope: &mut v8::HandleScope) -> String {
+    // Get V8 stack trace
+    let stack_trace = v8::StackTrace::current_stack_trace(scope, 10);
+    
+    if let Some(trace) = stack_trace {
+        let mut stack_lines = Vec::new();
+        
+        for i in 0..trace.get_frame_count() {
+            if let Some(frame) = trace.get_frame(scope, i) {
+                let function_name = frame.get_function_name(scope)
+                    .map(|name| name.to_rust_string_lossy(scope))
+                    .unwrap_or_else(|| "anonymous".to_string());
+                
+                let script_name = frame.get_script_name(scope)
+                    .map(|name| name.to_rust_string_lossy(scope))
+                    .unwrap_or_else(|| "<eval>".to_string());
+                
+                let line_number = frame.get_line_number();
+                let column_number = frame.get_column();
+                
+                stack_lines.push(format!(
+                    "    at {} ({}:{}:{})", 
+                    function_name, 
+                    script_name, 
+                    line_number, 
+                    column_number
+                ));
+            }
+        }
+        
+        if stack_lines.is_empty() {
+            "    at <anonymous>".to_string()
+        } else {
+            stack_lines.join("\n")
+        }
+    } else {
+        "    at <anonymous>".to_string()
+    }
 }
 
 fn extract_error_info(scope: &mut v8::HandleScope, error: v8::Local<v8::Value>) -> StackTrace {

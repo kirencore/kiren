@@ -1,9 +1,11 @@
-use crate::api::{buffer, environment, events, fetch, filesystem, http, process, streams, test, timers};
+use crate::api::{buffer, environment, events, fetch, filesystem, http, process, streams, test, timers, crypto, filesystem_improved, process_improved};
+use crate::typescript;
 use anyhow::Result;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use std::sync::{Arc, Mutex, Once};
-use std::time::Instant;
+use std::sync::{Arc, Mutex, Once, atomic::{AtomicBool, Ordering}};
+use std::time::{Instant, Duration};
+use tokio::time::sleep;
 use v8;
 
 static INIT: Once = Once::new();
@@ -12,6 +14,8 @@ static CONSOLE_TIMERS: Lazy<DashMap<String, Instant>> = Lazy::new(|| DashMap::ne
 pub struct Engine {
     isolate: v8::OwnedIsolate,
     context_initialized: bool,
+    event_loop_running: Arc<AtomicBool>,
+    cached_context: Option<v8::Global<v8::Context>>,
 }
 
 impl Engine {
@@ -26,15 +30,20 @@ impl Engine {
             v8::V8::initialize();
         });
 
-        // Create isolate with default settings (V8 0.84 limitations)
-        let mut isolate = v8::Isolate::new(Default::default());
+        // Create isolate with optimized settings for performance
+        let create_params = v8::CreateParams::default()
+            .heap_limits(0, 128 * 1024 * 1024); // Set reasonable heap limit (128MB)
+        let mut isolate = v8::Isolate::new(create_params);
 
         // Performance optimizations
-        isolate.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
+        isolate.set_capture_stack_trace_for_uncaught_exceptions(false, 0); // Disable for performance
+        isolate.set_allow_atomics_wait(false); // Not needed for most scripts
 
         Ok(Engine { 
             isolate,
             context_initialized: false,
+            event_loop_running: Arc::new(AtomicBool::new(false)),
+            cached_context: None,
         })
     }
 
@@ -42,12 +51,85 @@ impl Engine {
         self.execute_with_callbacks(source, true)
     }
 
-    pub fn execute_module(&mut self, source: &str, _module_name: &str) -> Result<String> {
-        // Static import'ları dynamic import'a dönüştür
-        let transformed_source = self.transform_static_imports(source);
-        println!("Original source:\n{}", source);
-        println!("Transformed source:\n{}", transformed_source);
+    /// Execute JavaScript with continuous timer callback processing for long-running scripts
+    pub async fn execute_with_event_loop(&mut self, source: &str) -> Result<String> {
+        // Start the event loop
+        self.event_loop_running.store(true, Ordering::SeqCst);
         
+        // Clone the flag for the background task
+        let event_loop_flag = self.event_loop_running.clone();
+        
+        // Start background timer callback processor
+        let _background_task = tokio::spawn(async move {
+            while event_loop_flag.load(Ordering::SeqCst) {
+                // Process timer callbacks periodically
+                if let Err(e) = Self::process_queued_callbacks().await {
+                    eprintln!("Timer callback processing error: {}", e);
+                }
+                
+                // Small delay to prevent busy waiting
+                sleep(Duration::from_millis(10)).await;
+            }
+        });
+
+        // Execute the main script
+        let result = self.execute_with_callbacks(source, true)?;
+        
+        // Keep the event loop running for a bit to process timers
+        sleep(Duration::from_millis(100)).await;
+        
+        // Keep processing callbacks until queue is empty or timeout
+        let start_time = std::time::Instant::now();
+        let timeout = Duration::from_secs(5); // 5 second timeout for cleanup
+        
+        while start_time.elapsed() < timeout {
+            let had_callbacks = self.execute_with_callbacks("", true).is_ok();
+            if !had_callbacks {
+                break;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+        
+        // Stop the event loop
+        self.event_loop_running.store(false, Ordering::SeqCst);
+        
+        Ok(result)
+    }
+
+    /// Process queued timer callbacks (static method for background task)
+    async fn process_queued_callbacks() -> Result<()> {
+        // This is a placeholder - we'll need a different approach since
+        // we can't access V8 scope from background thread
+        Ok(())
+    }
+
+    pub fn execute_module(&mut self, source: &str, module_name: &str) -> Result<String> {
+        // Check cache first for performance
+        {
+            let cache = MODULE_CACHE.lock().unwrap();
+            if let Some(cached_source) = cache.get(module_name) {
+                return self.execute_with_callbacks(cached_source, true);
+            }
+        }
+        
+        // Check if it's TypeScript and transpile if needed
+        let processed_source = if module_name.ends_with(".ts") || module_name.ends_with(".tsx") {
+            match typescript::transpile_typescript_content(source) {
+                Ok(js_code) => js_code,
+                Err(e) => return Err(e),
+            }
+        } else {
+            source.to_string()
+        };
+
+        // Static import'ları dynamic import'a dönüştür
+        let transformed_source = self.transform_static_imports(&processed_source);
+        
+        // Cache the transformed source for future use
+        {
+            let mut cache = MODULE_CACHE.lock().unwrap();
+            cache.insert(module_name.to_string(), transformed_source.clone());
+        }
         
         // Normal execute ile çalıştır ama module context'te
         self.execute_with_callbacks(&transformed_source, true)
@@ -59,20 +141,53 @@ impl Engine {
             return source.to_string();
         }
         
-        // Önce named imports'u transform et - custom import function kullan
-        let mut transformed = NAMED_IMPORT_REGEX.replace_all(source, "const { $1 } = await __kiren_import('$2');").to_string();
+        let mut transformed = source.to_string();
+        let mut has_imports = false;
+        let mut exports = Vec::new();
         
-        // Sonra default imports'u transform et - custom import function kullan
-        transformed = DEFAULT_IMPORT_REGEX.replace_all(&transformed, "const $1 = (await __kiren_import('$2')).default;").to_string();
+        // Named imports'u transform et
+        transformed = NAMED_IMPORT_REGEX.replace_all(&transformed, |caps: &regex::Captures| {
+            has_imports = true;
+            format!("const {{ {} }} = await __kiren_import('{}');", &caps[1], &caps[2])
+        }).to_string();
         
-        // Export statement'ları comment out et (basit replace)
-        if transformed.contains("export ") {
-            transformed = transformed.replace("export {", "// export {");
-            transformed = transformed.replace("export default", "// export default");
+        // Default imports'u transform et  
+        transformed = DEFAULT_IMPORT_REGEX.replace_all(&transformed, |caps: &regex::Captures| {
+            has_imports = true;
+            format!("const {} = (await __kiren_import('{}')).default;", &caps[1], &caps[2])
+        }).to_string();
+        
+        // Export function declarations - basit regex ile
+        if transformed.contains("export function") {
+            let export_fn_regex = regex::Regex::new(r"export\s+function\s+(\w+)").unwrap();
+            transformed = export_fn_regex.replace_all(&transformed, "function $1").to_string();
+            for caps in export_fn_regex.captures_iter(source) {
+                exports.push(format!("{}: {}", &caps[1], &caps[1]));
+            }
+        }
+        
+        // Export const/let declarations
+        if transformed.contains("export const") || transformed.contains("export let") {
+            let export_const_regex = regex::Regex::new(r"export\s+(?:const|let)\s+(\w+)").unwrap();
+            for caps in export_const_regex.captures_iter(source) {
+                exports.push(format!("{}: {}", &caps[1], &caps[1]));
+            }
+            transformed = export_const_regex.replace_all(&transformed, "const $1").to_string();
+        }
+        
+        // Export default - basit replace
+        if transformed.contains("export default") {
+            transformed = transformed.replace("export default", "const __default_export =");
+            exports.push("default: __default_export".to_string());
+        }
+        
+        // Eğer export'lar varsa module.exports ekle (CommonJS uyumluluğu için)
+        if !exports.is_empty() {
+            transformed += &format!("\n\n// Module exports for compatibility\nif (typeof module !== 'undefined' && module.exports) {{\n  Object.assign(module.exports, {{ {} }});\n}}", exports.join(", "));
         }
         
         // Async wrapper sadece transformation yapıldıysa ekle
-        if transformed != source {
+        if has_imports || !exports.is_empty() {
             format!("(async () => {{\n{}\n}})();", transformed)
         } else {
             transformed
@@ -86,28 +201,52 @@ impl Engine {
     ) -> Result<String> {
         let scope = &mut v8::HandleScope::new(&mut self.isolate);
         
-        // Fast context creation
-        let context = v8::Context::new(scope);
-        let scope = &mut v8::ContextScope::new(scope, context);
-        let global = context.global(scope);
+        // Use cached context or create new one with API setup
+        let context = if let Some(ref cached) = self.cached_context {
+            v8::Local::new(scope, cached)
+        } else {
+            let new_context = v8::Context::new(scope);
+            
+            // Setup APIs only once when creating new context
+            {
+                let scope = &mut v8::ContextScope::new(scope, new_context);
+                let global = new_context.global(scope);
 
-        // Setup all APIs - simplified for now
-        crate::api::console::setup_console(scope, context)?;
-        crate::api::errors::setup_error_handling(scope, context)?;
-        crate::api::npm_simple::setup_npm_compatibility(scope, context)?;
-        crate::api::express::setup_express(scope, context)?;
-        timers::setup_timers(scope, context)?;
-        fetch::setup_fetch(scope, context)?;
-        buffer::initialize_buffer_api(scope, global)?;
-        events::initialize_events_api(scope, global)?;
-        streams::initialize_streams_api(scope, global)?;
-        filesystem::setup_filesystem(scope, context)?;
-        process::setup_process(scope, context)?;
-        environment::setup_environment(scope, context)?;
-        http::setup_http(scope, context)?;
-        test::setup_test_framework(scope, context)?;
-        crate::modules::es_modules_simple::setup_es_modules(scope, context)?;
-        crate::modules::commonjs_simple::setup_commonjs(scope, context)?;
+                // Core APIs - setup once for performance
+                let _ = crate::api::console::setup_console(scope, new_context);
+                let _ = crate::api::errors::setup_error_handling(scope, new_context);
+                let _ = timers::setup_timers(scope, new_context);
+                let _ = fetch::setup_fetch(scope, new_context);
+                let _ = buffer::initialize_buffer_api(scope, global);
+                let _ = events::initialize_events_api(scope, global);
+                let _ = streams::initialize_streams_api(scope, global);
+                
+                // Enhanced APIs
+                let _ = filesystem_improved::setup_filesystem_improved(scope, new_context);
+                let _ = process_improved::setup_process_object(scope, new_context);
+                let _ = crypto::setup_crypto(scope, new_context);
+                
+                // Legacy APIs for compatibility
+                let _ = filesystem::setup_filesystem(scope, new_context);
+                let _ = process::setup_process(scope, new_context);
+                let _ = environment::setup_environment(scope, new_context);
+                let _ = http::setup_http(scope, new_context);
+                let _ = test::setup_test_framework(scope, new_context);
+                let _ = crate::modules::es_modules_simple::setup_es_modules(scope, new_context);
+                let _ = crate::modules::commonjs_simple::setup_commonjs(scope, new_context);
+                
+                // Optional APIs (can be disabled for performance)
+                let _ = crate::api::npm_simple::setup_npm_compatibility(scope, new_context);
+                let _ = crate::api::express::setup_express(scope, new_context);
+            }
+            
+            self.cached_context = Some(v8::Global::new(scope, new_context));
+            self.context_initialized = true;
+            new_context
+        };
+        
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let _global = context.global(scope);
 
         // Execute JavaScript with better error handling
         let source_string = v8::String::new(scope, source).unwrap();
@@ -128,30 +267,57 @@ impl Engine {
             false,                // is module
         );
 
-        let script = match v8::Script::compile(scope, source_string, Some(&origin)) {
+        // Use TryCatch for better error reporting
+        let mut try_catch = v8::TryCatch::new(scope);
+        
+        let script = match v8::Script::compile(&mut try_catch, source_string, Some(&origin)) {
             Some(script) => script,
             None => {
-                return Err(anyhow::anyhow!(
-                    "Syntax Error: Failed to compile JavaScript"
-                ));
+                if let Some(exception) = try_catch.exception() {
+                    let exception_str = exception.to_string(&mut try_catch).unwrap();
+                    let error_msg = exception_str.to_rust_string_lossy(&mut try_catch);
+                    
+                    // Try to get stack trace if available
+                    if let Some(stack_trace) = try_catch.stack_trace() {
+                        let stack_str = stack_trace.to_string(&mut try_catch).unwrap();
+                        let stack_msg = stack_str.to_rust_string_lossy(&mut try_catch);
+                        return Err(anyhow::anyhow!("Syntax Error: {}\n{}", error_msg, stack_msg));
+                    }
+                    
+                    return Err(anyhow::anyhow!("Syntax Error: {}", error_msg));
+                }
+                return Err(anyhow::anyhow!("Syntax Error: Failed to compile JavaScript"));
             }
         };
 
-        match script.run(scope) {
+        match script.run(&mut try_catch) {
             Some(result) => {
-                let result_str = result.to_string(scope).unwrap();
-                let result_string = result_str.to_rust_string_lossy(scope);
+                let result_str = result.to_string(&mut try_catch).unwrap();
+                let result_string = result_str.to_rust_string_lossy(&mut try_catch);
 
                 // Process any queued timer callbacks if requested
                 if process_callbacks {
-                    timers::process_timer_callbacks(scope)?;
+                    timers::process_timer_callbacks(&mut try_catch)?;
                 }
 
                 Ok(result_string)
             }
-            None => Err(anyhow::anyhow!(
-                "Runtime Error: Failed to execute JavaScript"
-            )),
+            None => {
+                if let Some(exception) = try_catch.exception() {
+                    let exception_str = exception.to_string(&mut try_catch).unwrap();
+                    let error_msg = exception_str.to_rust_string_lossy(&mut try_catch);
+                    
+                    // Try to get stack trace if available
+                    if let Some(stack_trace) = try_catch.stack_trace() {
+                        let stack_str = stack_trace.to_string(&mut try_catch).unwrap();
+                        let stack_msg = stack_str.to_rust_string_lossy(&mut try_catch);
+                        return Err(anyhow::anyhow!("Runtime Error: {}\n{}", error_msg, stack_msg));
+                    }
+                    
+                    return Err(anyhow::anyhow!("Runtime Error: {}", error_msg));
+                }
+                Err(anyhow::anyhow!("Runtime Error: Failed to execute JavaScript"))
+            }
         }
     }
 

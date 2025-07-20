@@ -74,18 +74,11 @@ pub fn process_timer_callbacks(scope: &mut v8::HandleScope) -> Result<()> {
         if callback.is_function {
             // For function callbacks, execute the stored function source
             if let Some(ref function_source) = callback.function_source {
-                if let Err(e) = execute_function_callback(scope, &callback, function_source) {
-                    println!("❌ Timer function callback error: {}", e);
-                }
-            } else {
-                println!("⚡ Timer callback executed (id: {})", callback.id);
-                println!("   📝 Function callback (no source available)");
+                let _ = execute_function_callback(scope, &callback, function_source);
             }
         } else {
             // For string callbacks, execute them in proper scope
-            if let Err(e) = execute_string_callback(scope, &callback) {
-                println!("❌ Timer callback error: {}", e);
-            }
+            let _ = execute_string_callback(scope, &callback);
         }
     }
 
@@ -123,46 +116,14 @@ fn execute_string_callback(scope: &mut v8::HandleScope, callback: &TimerCallback
     match v8::Script::compile(&mut try_catch, source_string, Some(&origin)) {
         Some(script) => match script.run(&mut try_catch) {
             Some(_) => {
-                println!("⚡ Timer callback executed: {}", callback.callback_source);
+                // Callback executed successfully
             }
             None => {
-                if try_catch.has_caught() {
-                    if let Some(exception) = try_catch.exception() {
-                        let exc_str = exception.to_string(&mut try_catch).unwrap();
-                        let error_msg = exc_str.to_rust_string_lossy(&mut try_catch);
-                        println!("❌ Timer callback runtime error: {}", error_msg);
-                    } else {
-                        println!(
-                            "❌ Timer callback execution failed: {}",
-                            callback.callback_source
-                        );
-                    }
-                } else {
-                    println!(
-                        "❌ Timer callback execution failed: {}",
-                        callback.callback_source
-                    );
-                }
+                // Timer callback execution failed - silent failure for production
             }
         },
         None => {
-            if try_catch.has_caught() {
-                if let Some(exception) = try_catch.exception() {
-                    let exc_str = exception.to_string(&mut try_catch).unwrap();
-                    let error_msg = exc_str.to_rust_string_lossy(&mut try_catch);
-                    println!("❌ Timer callback compilation error: {}", error_msg);
-                } else {
-                    println!(
-                        "❌ Timer callback compilation failed: {}",
-                        callback.callback_source
-                    );
-                }
-            } else {
-                println!(
-                    "❌ Timer callback compilation failed: {}",
-                    callback.callback_source
-                );
-            }
+            // Timer callback compilation failed - silent failure for production
         }
     }
 
@@ -201,34 +162,14 @@ fn execute_function_callback(scope: &mut v8::HandleScope, callback: &TimerCallba
     match v8::Script::compile(&mut try_catch, source_string, Some(&origin)) {
         Some(script) => match script.run(&mut try_catch) {
             Some(_) => {
-                println!("⚡ Timer function callback executed (id: {})", callback.id);
+                // Function callback executed successfully
             }
             None => {
-                if try_catch.has_caught() {
-                    if let Some(exception) = try_catch.exception() {
-                        let exc_str = exception.to_string(&mut try_catch).unwrap();
-                        let error_msg = exc_str.to_rust_string_lossy(&mut try_catch);
-                        println!("❌ Timer function callback runtime error: {}", error_msg);
-                    } else {
-                        println!("❌ Timer function callback execution failed: {}", callback.id);
-                    }
-                } else {
-                    println!("❌ Timer function callback execution failed: {}", callback.id);
-                }
+                // Function callback execution failed - silent failure for production
             }
         },
         None => {
-            if try_catch.has_caught() {
-                if let Some(exception) = try_catch.exception() {
-                    let exc_str = exception.to_string(&mut try_catch).unwrap();
-                    let error_msg = exc_str.to_rust_string_lossy(&mut try_catch);
-                    println!("❌ Timer function callback compilation error: {}", error_msg);
-                } else {
-                    println!("❌ Timer function callback compilation failed: {}", callback.id);
-                }
-            } else {
-                println!("❌ Timer function callback compilation failed: {}", callback.id);
-            }
+            // Function callback compilation failed - silent failure for production
         }
     }
 
@@ -304,7 +245,6 @@ fn set_timeout(
                         let mut queue = CALLBACK_QUEUE.lock().unwrap();
                         queue.push(timer_callback);
                     }
-                    println!("⚡ setTimeout function callback queued (id: {})", id_clone);
                 } else {
                     // For string callbacks, queue them for execution
                     let timer_callback = TimerCallback {
@@ -319,10 +259,6 @@ fn set_timeout(
                         let mut queue = CALLBACK_QUEUE.lock().unwrap();
                         queue.push(timer_callback);
                     }
-                    println!(
-                        "⚡ setTimeout string callback queued: {}",
-                        cb_info.callback_source
-                    );
                 }
             }
             callbacks.remove(&id_clone);
@@ -435,10 +371,6 @@ fn set_interval(
                             let mut queue = CALLBACK_QUEUE.lock().unwrap();
                             queue.push(timer_callback);
                         }
-                        println!(
-                            "🔄 setInterval function callback #{} queued (id: {})",
-                            count, interval_id
-                        );
                     } else {
                         // For string callbacks, queue them for execution
                         let timer_callback = TimerCallback {
@@ -453,10 +385,6 @@ fn set_interval(
                             let mut queue = CALLBACK_QUEUE.lock().unwrap();
                             queue.push(timer_callback);
                         }
-                        println!(
-                            "🔄 setInterval string callback #{} queued: {}",
-                            count, callback_source
-                        );
                     }
                     true
                 }

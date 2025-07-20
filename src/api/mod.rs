@@ -1,14 +1,17 @@
 pub mod buffer;
 pub mod console;
+pub mod crypto;
 pub mod environment;
 pub mod errors;
 pub mod events;
 pub mod express;
 pub mod fetch;
 pub mod filesystem;
+pub mod filesystem_improved;
 pub mod http;
 pub mod npm_simple;
 pub mod process;
+pub mod process_improved;
 pub mod request_response;
 pub mod static_files;
 pub mod streams;

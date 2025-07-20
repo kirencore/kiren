@@ -1,5 +1,4 @@
 use anyhow::Result;
-use crossbeam_channel::{bounded, Receiver, Sender};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use once_cell::sync::Lazy;
@@ -280,27 +279,97 @@ fn server_delete(
 async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) -> Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     
-    let make_svc =
-        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_request)) });
+    let make_svc = make_service_fn(|_conn| async { 
+        Ok::<_, Infallible>(service_fn(handle_request_with_timeout)) 
+    });
 
-    let server = Server::bind(&addr).serve(make_svc);
-    eprintln!("HTTP server listening on http://127.0.0.1:{}", port);
+    // Enhanced server configuration for production
+    let server = Server::bind(&addr)
+        .http1_keepalive(true)               // Enable keep-alive
+        .http1_half_close(false)             // Disable half-close for better connection reuse  
+        .tcp_nodelay(true)                   // Disable Nagle's algorithm for lower latency
+        .tcp_keepalive(Some(Duration::from_secs(60)))  // TCP keep-alive
+        .serve(make_svc);
+        
+    eprintln!("🚀 HTTP server listening on http://127.0.0.1:{}", port);
+    eprintln!("✅ Enhanced connection handling enabled (keep-alive, timeouts, security)");
     
     // Graceful shutdown with broadcast receiver
     let graceful = server.with_graceful_shutdown(async {
         let _ = shutdown_rx.recv().await;
-        eprintln!("Shutting down HTTP server on port {}", port);
+        eprintln!("🛑 Shutting down HTTP server on port {}", port);
     });
     
     if let Err(e) = graceful.await {
-        eprintln!("Server error: {}", e);
+        eprintln!("❌ Server error: {}", e);
         return Err(e.into());
     }
     
+    eprintln!("✅ HTTP server on port {} shutdown complete", port);
     Ok(())
 }
 
+// Request handler with timeout protection  
+async fn handle_request_with_timeout(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    // Apply request timeout (30 seconds)
+    match timeout(Duration::from_secs(30), handle_request(req)).await {
+        Ok(response) => response,
+        Err(_) => {
+            // Timeout occurred
+            Ok(Response::builder()
+                .status(StatusCode::REQUEST_TIMEOUT)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"error":"Request timeout - processing took too long"}"#))
+                .unwrap())
+        }
+    }
+}
+
+// Request size limit (10MB)
+const MAX_REQUEST_SIZE: u64 = 10 * 1024 * 1024;
+
+// Helper function to add security headers to responses
+fn add_security_headers(response: Response<Body>) -> Response<Body> {
+    let (mut parts, body) = response.into_parts();
+    
+    // Security headers for production
+    parts.headers.insert("x-frame-options", "DENY".parse().unwrap());
+    parts.headers.insert("x-content-type-options", "nosniff".parse().unwrap());
+    parts.headers.insert("x-xss-protection", "1; mode=block".parse().unwrap());
+    parts.headers.insert("referrer-policy", "strict-origin-when-cross-origin".parse().unwrap());
+    parts.headers.insert("content-security-policy", "default-src 'self'".parse().unwrap());
+    
+    // Restrict CORS to specific origins in production (currently allowing all for development)
+    if !parts.headers.contains_key("access-control-allow-origin") {
+        parts.headers.insert("access-control-allow-origin", "*".parse().unwrap());
+    }
+    
+    Response::from_parts(parts, body)
+}
+
+// Validate request size
+async fn validate_request_size(req: &Request<Body>) -> bool {
+    if let Some(content_length) = req.headers().get("content-length") {
+        if let Ok(length_str) = content_length.to_str() {
+            if let Ok(length) = length_str.parse::<u64>() {
+                return length <= MAX_REQUEST_SIZE;
+            }
+        }
+    }
+    true // If no content-length header, allow request
+}
+
 async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    // Validate request size first
+    if !validate_request_size(&req).await {
+        let error_response = Response::builder()
+            .status(StatusCode::PAYLOAD_TOO_LARGE)
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"error":"Request too large. Maximum size is {} bytes"}}"#, MAX_REQUEST_SIZE)))
+            .unwrap();
+        return Ok(add_security_headers(error_response));
+    }
+
     let method = req.method().to_string();
     let path = req.uri().path();
 
@@ -317,11 +386,12 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
                         "text/plain"
                     };
                     
-                    return Ok(Response::builder()
+                    let response = Response::builder()
                         .header("content-type", content_type)
                         .header("access-control-allow-origin", "*")  // CORS support
                         .body(Body::from(response.clone()))
-                        .unwrap());
+                        .unwrap();
+                    return Ok(add_security_headers(response));
                 }
             }
         }
@@ -375,5 +445,5 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
             .unwrap(),
     };
 
-    Ok(response)
+    Ok(add_security_headers(response))
 }

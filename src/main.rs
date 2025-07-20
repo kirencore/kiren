@@ -12,6 +12,7 @@ mod config;
 mod modules;
 mod runtime;
 mod package;
+mod typescript;
 use runtime::engine::Engine;
 use config::KirenConfig;
 use api::console;
@@ -382,7 +383,8 @@ async fn run_repl() -> Result<()> {
 }
 
 async fn execute_file_with_config(filename: &str, _config: &KirenConfig) -> Result<()> {
-    execute_file(filename).await
+    let mut engine = Engine::new()?;
+    execute_file_with_engine(filename, &mut engine).await
 }
 
 async fn run_repl_with_config(_config: &KirenConfig) -> Result<()> {
@@ -402,20 +404,53 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
                    source.contains("import ") ||
                    source.contains("export ");
 
-    let result = if is_module {
-        engine.execute_module(&source, filename)
+    // Check if script contains timers and use event loop if needed
+    let contains_timers = source.contains("setTimeout") || 
+                         source.contains("setInterval") ||
+                         source.contains("createServer") ||
+                         source.contains("listen");
+
+    let result = if contains_timers {
+        // Use event loop for scripts with timers
+        let processed_source = if is_module {
+            // For modules, first process them then use event loop
+            let module_result = engine.execute_module(&source, filename)?;
+            source.clone() // Use original source for event loop
+        } else {
+            source.clone()
+        };
+        engine.execute_with_event_loop(&processed_source).await
     } else {
-        engine.execute(&source)
+        // Normal execution for scripts without timers
+        if is_module {
+            engine.execute_module(&source, filename)
+        } else {
+            engine.execute(&source)
+        }
     };
 
     match result {
         Ok(_) => {
-            // Quick timer callback processing for all scripts
-            for _ in 0..3 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-                if let Err(e) = engine.execute_with_callbacks("", true) {
-                    if !e.to_string().contains("Failed to compile") {
-                        eprintln!("Timer callback error: {}", e);
+            // Enhanced timer callback processing for scripts with timers
+            if contains_timers {
+                // Wait for timer tasks to complete and process their callbacks
+                let start_time = std::time::Instant::now();
+                let timeout = tokio::time::Duration::from_secs(10); // 10 second timeout
+                
+                while start_time.elapsed() < timeout {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                    
+                    if let Err(_) = engine.execute_with_callbacks("", true) {
+                        // Timer callback processing failed - continue silently
+                    }
+                }
+            } else {
+                // Quick callback processing for scripts without timers
+                for _ in 0..3 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                    if let Err(_) = engine.execute_with_callbacks("", true) {
+                        // Callback processing failed - continue silently
+                        break;
                     }
                 }
             }

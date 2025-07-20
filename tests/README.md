@@ -4,49 +4,92 @@ This directory contains all test files for the Kiren JavaScript Runtime.
 
 ## 📁 Test Organization
 
-### Core Test Files
-- **`test-runner.js`** - Main comprehensive test suite
-- **`test-suite-complete.js`** - Original complete test suite
+### Unit Tests (`unit/`)
+Core functionality and individual feature tests:
+- **Buffer API Tests**: `test-buffer.js`
+- **Events API Tests**: `test-events.js` 
+- **Process API Tests**: `test-process.js`, `test-process-cwd.js`
+- **Streams API Tests**: `test-streams.js`
+- **Timer API Tests**: `test-timers.js`, `test_timer.js`, `test_timer_full.js`
+- **Error Handling Tests**: `test_error.js`
+- **Comprehensive Test Suites**: `test-comprehensive.js`, `test-final-complete.js`, `test-final.js`, `test-new-features.js`, `test-suite-complete.js`
 
-### Feature-Specific Tests
-- **`test-simple.js`** - Basic JavaScript functionality
-- **`test-timers.js`** - Timer APIs (setTimeout, setInterval)
-- **`test-timer-simple.js`** - Simplified timer tests
-- **`test-http-simple.js`** - HTTP server functionality
-- **`test-dynamic-import.js`** - ES Modules dynamic imports
-- **`test-import-advanced.js`** - Advanced module import features
-- **`test-new-features.js`** - Latest runtime features
-- **`test-final.js`** - Final integration tests
-- **`test-final-complete.js`** - Complete final test suite
+### Integration Tests (`integration/`)
+End-to-end and system integration tests:
+- **HTTP Server Tests**: `test-http-simple.js`, `test-http.js`, `test_http_server.js`
+- **Static File Tests**: `test-static-files.js`
+- **Module System Tests**: `test-import-advanced.js`, `test-module-resolution.js`, `test-dynamic-import.js`, `test-url-imports.js`, `test_import.js`, `test_module.js`
+- **Compatibility Tests**: `test-gurubu-compatibility.js`
+- **Middleware Tests**: `test-middleware.js`
+- **API Tests**: `test-kps.js`, `test-runner.js`, `test-todo-api.sh`
 
-### Integration Tests
-- **`test-todo-api.sh`** - Shell script for Todo API testing
-- **`test-dir/`** - Directory for test assets and temporary files
+### Performance Tests (`performance/`)
+Benchmarking and performance validation:
+- **Core Performance**: `perf_test.js`
+- **Timer Performance**: `test-timer-simple.js`
+
+### Examples (`examples/`)
+Simple usage examples and basic tests:
+- **Basic Tests**: `simple-test.js`, `simple_http_test.js`, `test-simple.js`
+- **Test Assets**: `test-file.txt`, `test-dir/`
 
 ## 🚀 Running Tests
 
 ### Run Main Test Suite
 ```bash
 # Core functionality tests
-cargo run tests/test-runner.js
+cargo run tests/integration/test-runner.js
 
 # Complete test suite  
-cargo run tests/test-suite-complete.js
+cargo run tests/unit/test-suite-complete.js
 ```
 
-### Run Individual Tests
+### Run Unit Tests
 ```bash
-# Basic JavaScript tests
-cargo run tests/test-simple.js
-
 # Timer functionality
-cargo run tests/test-timers.js
+cargo run tests/unit/test-timers.js
 
+# Buffer API tests
+cargo run tests/unit/test-buffer.js
+
+# Events API tests
+cargo run tests/unit/test-events.js
+
+# Process API tests
+cargo run tests/unit/test-process.js
+
+# Error handling tests
+cargo run tests/unit/test_error.js
+```
+
+### Run Integration Tests
+```bash
 # HTTP server tests
-cargo run tests/test-http-simple.js
+cargo run tests/integration/test-http-simple.js
 
 # Module system tests
-cargo run tests/test-dynamic-import.js
+cargo run tests/integration/test-dynamic-import.js
+
+# Compatibility tests
+cargo run tests/integration/test-gurubu-compatibility.js
+```
+
+### Run Performance Tests
+```bash
+# Core performance benchmarks
+cargo run tests/performance/perf_test.js
+
+# Timer performance
+cargo run tests/performance/test-timer-simple.js
+```
+
+### Run Example Tests
+```bash
+# Basic JavaScript tests
+cargo run tests/examples/test-simple.js
+
+# Simple HTTP test
+cargo run tests/examples/simple_http_test.js
 ```
 
 ### Run HTTP API Tests
@@ -55,8 +98,8 @@ cargo run tests/test-dynamic-import.js
 cargo run examples/todo-api-simple.js &
 
 # Run API tests
-chmod +x tests/test-todo-api.sh
-./tests/test-todo-api.sh
+chmod +x tests/integration/test-todo-api.sh
+./tests/integration/test-todo-api.sh
 ```
 
 ## 📊 Test Coverage

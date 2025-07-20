@@ -48,6 +48,8 @@ ada-url = "2.0"
 base64 = "0.21"
 hex = "0.4"
 lazy_static = "1.4"
+sha2 = "0.10"
+md5 = "0.7"
 
 [dev-dependencies]
 tokio-test = "0.4"

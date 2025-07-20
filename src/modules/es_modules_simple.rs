@@ -118,13 +118,25 @@ fn dynamic_import(
 
             match module_path.and_then(|path| std::fs::read_to_string(path).map_err(|e| e.into())) {
                 Ok(source) => {
-                    // Create a module object with the source
-                    let module_obj = v8::Object::new(scope);
-                    let default_key = v8::String::new(scope, "default").unwrap();
-                    let source_val = v8::String::new(scope, &source).unwrap();
-                    module_obj.set(scope, default_key.into(), source_val.into());
-
-                    resolver.resolve(scope, module_obj.into());
+                    // Simplified module loading - just execute and return the result
+                    let transformed_source = transform_module_to_commonjs(&source);
+                    
+                    // Execute the transformed source
+                    let source_str = v8::String::new(scope, &transformed_source).unwrap();
+                    let script = v8::Script::compile(scope, source_str, None);
+                    
+                    if let Some(script) = script {
+                        if let Some(result) = script.run(scope) {
+                            // Return the executed module result
+                            resolver.resolve(scope, result);
+                        } else {
+                            let empty_module = v8::Object::new(scope);
+                            resolver.resolve(scope, empty_module.into());
+                        }
+                    } else {
+                        let empty_module = v8::Object::new(scope);
+                        resolver.resolve(scope, empty_module.into());
+                    }
                 }
                 Err(_) => {
                     // Module not found - create empty module
@@ -161,6 +173,47 @@ fn resolve_module_path(base_path: &std::path::Path, specifier: &str) -> Result<s
     // Handle bare imports
     let path = base_path.join(specifier);
     resolve_file_extension(path)
+}
+
+// Transform ES module to CommonJS-compatible code
+fn transform_module_to_commonjs(source: &str) -> String {
+    let mut transformed = source.to_string();
+    let mut exports = Vec::new();
+    
+    // Transform export function declarations
+    if let Ok(export_fn_regex) = regex::Regex::new(r"export\s+function\s+(\w+)") {
+        for caps in export_fn_regex.captures_iter(source) {
+            exports.push(format!("{}: {}", &caps[1], &caps[1]));
+        }
+        transformed = export_fn_regex.replace_all(&transformed, "function $1").to_string();
+    }
+    
+    // Transform export const/let declarations
+    if let Ok(export_const_regex) = regex::Regex::new(r"export\s+(?:const|let)\s+(\w+)") {
+        for caps in export_const_regex.captures_iter(source) {
+            exports.push(format!("{}: {}", &caps[1], &caps[1]));
+        }
+        transformed = export_const_regex.replace_all(&transformed, "const $1").to_string();
+    }
+    
+    // Transform export default
+    if transformed.contains("export default") {
+        transformed = transformed.replace("export default", "const __default_export =");
+        exports.push("default: __default_export".to_string());
+    }
+    
+    // Add module.exports at the end
+    if !exports.is_empty() {
+        transformed += &format!("\n\n// Return module exports\nreturn {{ {} }};", exports.join(", "));
+        // Wrap in IIFE to capture return value
+        transformed = format!("(function() {{\n{}\n}})()", transformed);
+    } else {
+        // If no exports, return empty object
+        transformed += "\nreturn {};";
+        transformed = format!("(function() {{\n{}\n}})()", transformed);
+    }
+    
+    transformed
 }
 
 fn resolve_file_extension(mut path: std::path::PathBuf) -> Result<std::path::PathBuf> {
