@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use v8;
 use once_cell::sync::Lazy;
 use tokio::signal;
+use crate::config::KirenConfig;
 
 // Global process state
 static PROCESS_STATE: Lazy<Arc<Mutex<ProcessState>>> = Lazy::new(|| {
@@ -107,7 +108,8 @@ fn add_process_properties(
     
     // process.version (Kiren version)
     let version_key = v8::String::new(scope, "version").unwrap();
-    let version_val = v8::String::new(scope, "v0.2.0").unwrap();
+    let version_text = format!("v{}", &KirenConfig::default().runtime.version);
+    let version_val = v8::String::new(scope, &version_text).unwrap();
     process_obj.set(scope, version_key.into(), version_val.into());
     
     // process.argv
