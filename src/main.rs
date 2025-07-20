@@ -309,7 +309,8 @@ fn extract_port_from_source(source: &str) -> u16 {
 }
 
 async fn run_repl() -> Result<()> {
-    println!("Kiren v0.1.0 - High-performance JavaScript Runtime");
+    let runtime_version = &config::KirenConfig::default().runtime.version;
+    println!("Kiren v{} REPL Mode", runtime_version);
     println!("Type '.exit' to quit");
 
     let mut engine = Engine::new()?;
@@ -473,7 +474,10 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
 }
 
 async fn run_watch_mode(filename: &str) -> Result<()> {
-    println!("Kiren v0.1.0 - File watching enabled");
+    println!(
+        "Kiren v{} - File watching enabled",
+        config::KirenConfig::default().runtime.version
+    );
     println!("Watching: {}", filename);
     println!("Press Ctrl+C to stop watching");
     println!();
