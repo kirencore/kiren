@@ -1,6 +1,6 @@
 [package]
 name = "kiren"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 authors = ["Mert Can Altin <mertcanaltin@example.com>"]
 description = "A high-performance JavaScript runtime built with Rust - Zero config, single binary, production ready"
