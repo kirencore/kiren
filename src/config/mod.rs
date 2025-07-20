@@ -16,6 +16,7 @@ pub struct RuntimeConfig {
     pub v8_flags: Vec<String>,
     pub memory_limit: Option<usize>, // MB
     pub max_old_space_size: Option<usize>, // MB
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,7 @@ impl Default for KirenConfig {
                 v8_flags: vec![],
                 memory_limit: Some(512),
                 max_old_space_size: Some(256),
+                version: env!("CARGO_PKG_VERSION").to_string(),
             },
             server: ServerConfig {
                 default_port: 3000,
