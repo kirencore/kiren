@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -16,7 +17,7 @@ pub struct ResolvedModule {
 pub enum ModuleType {
     CommonJS,
     ESModule,
-    JSON,
+    Json,
     BuiltIn,
 }
 
@@ -324,7 +325,7 @@ impl ModuleResolver {
             match ext.to_string_lossy().as_ref() {
                 "mjs" => return ModuleType::ESModule,
                 "cjs" => return ModuleType::CommonJS,
-                "json" => return ModuleType::JSON,
+                "json" => return ModuleType::Json,
                 _ => {}
             }
         }
@@ -408,7 +409,7 @@ mod tests {
         );
         assert_eq!(
             resolver.detect_module_type(Path::new("test.json"), ""),
-            ModuleType::JSON
+            ModuleType::Json
         );
     }
 }

@@ -1,6 +1,5 @@
-use anyhow::Result;
-use hyper::{Body, Request, Response, StatusCode};
-use serde_json::{json, Value};
+#![allow(dead_code)]
+use serde_json::Value;
 use std::collections::HashMap;
 use v8;
 

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -84,11 +85,9 @@ impl PackageResolver {
 
     fn resolve_version_range(&self, range: &str, versions: &[String]) -> Result<String> {
         // Simplified semver range resolution
-        if range.starts_with('^') {
-            let base_version = &range[1..];
+        if let Some(base_version) = range.strip_prefix('^') {
             self.find_compatible_version(base_version, versions, false)
-        } else if range.starts_with('~') {
-            let base_version = &range[1..];
+        } else if let Some(base_version) = range.strip_prefix('~') {
             self.find_compatible_version(base_version, versions, true)
         } else {
             // Treat as exact version
@@ -177,8 +176,8 @@ impl PackageSpec {
         }
 
         // kiren: prefix
-        if spec.starts_with("kiren:") {
-            let spec = &spec[6..]; // Remove "kiren:" prefix
+        if let Some(spec) = spec.strip_prefix("kiren:") {
+            // Remove "kiren:" prefix
             return Self::parse_registry_spec(spec);
         }
 
@@ -243,7 +242,7 @@ impl PackageSpec {
         // Simple git parsing for now
         let name = spec
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or("unknown")
             .replace(".git", "");
 

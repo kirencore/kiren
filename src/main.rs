@@ -218,6 +218,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn execute_file(filename: &str) -> Result<()> {
     let source = fs::read_to_string(filename)?;
     let mut engine = Engine::new()?;
@@ -413,7 +414,7 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
         // Use event loop for scripts with timers
         let processed_source = if is_module {
             // For modules, first process them then use event loop
-            let module_result = engine.execute_module(&source, filename)?;
+            let _module_result = engine.execute_module(&source, filename)?;
             source.clone() // Use original source for event loop
         } else {
             source.clone()
@@ -439,7 +440,7 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
                 while start_time.elapsed() < timeout {
                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-                    if let Err(_) = engine.execute_with_callbacks("", true) {
+                    if engine.execute_with_callbacks("", true).is_err() {
                         // Timer callback processing failed - continue silently
                     }
                 }
@@ -447,7 +448,7 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
                 // Quick callback processing for scripts without timers
                 for _ in 0..3 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                    if let Err(_) = engine.execute_with_callbacks("", true) {
+                    if engine.execute_with_callbacks("", true).is_err() {
                         // Callback processing failed - continue silently
                         break;
                     }
@@ -619,7 +620,6 @@ async fn handle_remove_command(matches: &clap::ArgMatches) -> Result<()> {
         if removed_from_deps || removed_from_dev {
             let updated_content = config.to_toml()?;
             tokio::fs::write(&config_path, updated_content).await?;
-        } else {
         }
     } else {
         return Err(anyhow::anyhow!("No kiren.toml found"));

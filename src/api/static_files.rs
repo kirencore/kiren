@@ -1,6 +1,6 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use hyper::{Body, Response, StatusCode};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 

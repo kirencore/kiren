@@ -1,4 +1,4 @@
-use crate::api::http;
+#![allow(dead_code)]
 use anyhow::Result;
 use v8;
 

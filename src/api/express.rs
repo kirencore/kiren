@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use hyper::{Body, Request, Response, Server, StatusCode};
 use once_cell::sync::Lazy;

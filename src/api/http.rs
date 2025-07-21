@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
@@ -10,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::timeout;
-use uuid::Uuid;
 use v8;
 
 // HTTP callback execution system

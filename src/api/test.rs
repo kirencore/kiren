@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};

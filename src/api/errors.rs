@@ -1,6 +1,7 @@
 use anyhow::Result;
 use v8;
 
+#[allow(dead_code)]
 pub struct StackTrace {
     pub message: String,
     pub stack: String,
@@ -8,6 +9,7 @@ pub struct StackTrace {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StackFrame {
     pub function_name: String,
     pub file_name: String,
@@ -279,6 +281,7 @@ fn parse_location(function_name: &str, location: &str) -> Option<StackFrame> {
     }
 }
 
+#[allow(dead_code)]
 pub fn format_error_for_display(error_info: &StackTrace) -> String {
     let mut output = String::new();
 

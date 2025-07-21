@@ -72,6 +72,7 @@ impl KirenConfig {
         Ok(config)
     }
 
+    #[allow(dead_code)]
     pub fn save_to_file(&self, path: &PathBuf) -> Result<()> {
         let content = toml::to_string_pretty(self)?;
         std::fs::write(path, content)?;
