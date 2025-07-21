@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use v8;
 
 // Simplified CommonJS support
@@ -71,7 +70,6 @@ fn global_require(
             fs_obj.set(scope, exists_key.into(), exists_fn.into());
 
             rv.set(fs_obj.into());
-            return;
         }
         "path" => {
             let path_obj = v8::Object::new(scope);
@@ -80,7 +78,6 @@ fn global_require(
                 v8::String::new(scope, "function join() { return arguments[0]; }").unwrap();
             path_obj.set(scope, join_key.into(), join_str.into());
             rv.set(path_obj.into());
-            return;
         }
         "http" => {
             let http_obj = v8::Object::new(scope);
@@ -92,7 +89,6 @@ fn global_require(
             http_obj.set(scope, create_server_key.into(), create_server_fn.into());
 
             rv.set(http_obj.into());
-            return;
         }
         "express" => {
             // Create express function that returns an app
@@ -112,7 +108,6 @@ fn global_require(
             express_fn.set(scope, static_key.into(), static_fn.into());
 
             rv.set(express_fn.into());
-            return;
         }
         _ => {
             // For other modules, return empty object
@@ -172,7 +167,7 @@ fn fs_write_file_sync(
     let content_str = content_arg.to_string(scope).unwrap();
     let content = content_str.to_rust_string_lossy(scope);
 
-    if let Err(_) = std::fs::write(&path, &content) {
+    if std::fs::write(&path, &content).is_err() {
         let error = v8::String::new(scope, &format!("Cannot write file: {}", path)).unwrap();
         let exception = v8::Exception::error(scope, error);
         scope.throw_exception(exception);

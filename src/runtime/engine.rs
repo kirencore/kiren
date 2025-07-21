@@ -15,7 +15,8 @@ use tokio::time::sleep;
 use v8;
 
 static INIT: Once = Once::new();
-static CONSOLE_TIMERS: Lazy<DashMap<String, Instant>> = Lazy::new(|| DashMap::new());
+#[allow(dead_code)]
+static CONSOLE_TIMERS: Lazy<DashMap<String, Instant>> = Lazy::new(DashMap::new);
 
 pub struct Engine {
     isolate: v8::OwnedIsolate,
@@ -119,10 +120,7 @@ impl Engine {
 
         // Check if it's TypeScript and transpile if needed
         let processed_source = if module_name.ends_with(".ts") || module_name.ends_with(".tsx") {
-            match typescript::transpile_typescript_content(source) {
-                Ok(js_code) => js_code,
-                Err(e) => return Err(e),
-            }
+            typescript::transpile_typescript_content(source)?
         } else {
             source.to_string()
         };
@@ -355,13 +353,14 @@ impl Engine {
     // This function is not used anymore - all setup is done in execute_with_callbacks
     fn _unused_setup_apis(
         &mut self,
-        scope: &mut v8::ContextScope<v8::HandleScope>,
-        context: v8::Local<v8::Context>,
+        _scope: &mut v8::ContextScope<v8::HandleScope>,
+        _context: v8::Local<v8::Context>,
     ) -> Result<()> {
         Ok(())
     }
 }
 
+#[allow(dead_code)]
 fn console_log(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -379,6 +378,7 @@ fn console_log(
     println!("{}", output);
 }
 
+#[allow(dead_code)]
 fn console_time(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -395,6 +395,7 @@ fn console_time(
     CONSOLE_TIMERS.insert(label, Instant::now());
 }
 
+#[allow(dead_code)]
 fn console_time_end(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
@@ -427,6 +428,7 @@ impl Drop for Engine {
 static MODULE_CACHE: Lazy<Arc<Mutex<std::collections::HashMap<String, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
 
+#[allow(dead_code)]
 static IMPORT_META_RESOLVE: Lazy<Arc<Mutex<std::collections::HashMap<String, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
 

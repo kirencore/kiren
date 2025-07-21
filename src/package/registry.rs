@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use reqwest;
 use serde::Deserialize;
@@ -219,8 +220,7 @@ impl KirenRegistry {
             VersionSpec::Latest => Ok(available.last().unwrap().to_string()),
             VersionSpec::Range(range) => {
                 // Simple range resolution
-                if range.starts_with('^') {
-                    let base = &range[1..];
+                if let Some(base) = range.strip_prefix('^') {
                     for version in available.iter().rev() {
                         if version.starts_with(&base[..base.rfind('.').unwrap_or(0)]) {
                             return Ok(version.to_string());

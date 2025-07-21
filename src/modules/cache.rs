@@ -1,7 +1,8 @@
+#![allow(dead_code)]
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use v8;
 
 /// Module execution state

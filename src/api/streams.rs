@@ -766,7 +766,7 @@ fn transform_flush(
 fn passthrough_transform(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
-    mut retval: v8::ReturnValue,
+    retval: v8::ReturnValue,
 ) {
     // PassThrough just passes data through unchanged
     transform_transform(scope, args, retval);

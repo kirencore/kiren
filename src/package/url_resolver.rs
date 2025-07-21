@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use ada_url::Url;
 use anyhow::Result;
 use reqwest::Client;

@@ -1,7 +1,8 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 use super::cache::GlobalCache;
@@ -56,7 +57,7 @@ impl KirenPackageManager {
 
         // Check local cache first
         if let Some(cached) = self.cache.get(&package_spec).await? {
-            return Ok(self.build_resolved_package(cached).await?);
+            return self.build_resolved_package(cached).await;
         }
 
         // Fetch from registry
@@ -68,11 +69,11 @@ impl KirenPackageManager {
         // Store in cache
         self.cache.store(&package).await?;
 
-        Ok(self.build_resolved_package(package).await?)
+        self.build_resolved_package(package).await
     }
 
     /// Install packages from kiren.toml
-    pub async fn install(&self, project_dir: &PathBuf) -> Result<Vec<ResolvedPackage>> {
+    pub async fn install(&self, project_dir: &Path) -> Result<Vec<ResolvedPackage>> {
         let config_path = project_dir.join("kiren.toml");
 
         if !config_path.exists() {

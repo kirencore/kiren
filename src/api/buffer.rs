@@ -269,7 +269,7 @@ fn buffer_alloc_unsafe(
 fn buffer_from(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
-    mut retval: v8::ReturnValue,
+    retval: v8::ReturnValue,
 ) {
     if args.length() == 0 {
         let msg = v8::String::new(scope, "Buffer.from() requires an argument").unwrap();

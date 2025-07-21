@@ -285,7 +285,7 @@ fn event_emit(
         if listener_val.is_function() {
             // Regular function listener
             let listener_fn = unsafe { v8::Local::<v8::Function>::cast(listener_val) };
-            let undefined = v8::undefined(scope);
+            let _undefined = v8::undefined(scope);
             listener_fn.call(scope, this.into(), &event_args);
         } else if listener_val.is_object() {
             // Check if it's a once wrapper
@@ -298,7 +298,7 @@ fn event_emit(
 
             if actual_listener.is_function() {
                 let listener_fn = unsafe { v8::Local::<v8::Function>::cast(actual_listener) };
-                let undefined = v8::undefined(scope);
+                let _undefined = v8::undefined(scope);
                 listener_fn.call(scope, this.into(), &event_args);
 
                 // Mark for removal if it's a once listener
@@ -309,8 +309,8 @@ fn event_emit(
         }
     }
 
-    // Remove once listeners (in reverse order to maintain indices)
-    for &index in to_remove.iter().rev() {
+    // Remove once listeners (only the first one to avoid index issues)
+    if let Some(&index) = to_remove.iter().rev().next() {
         // Create new array without the removed listener
         let new_array = v8::Array::new(scope, (listener_count - 1) as i32);
         let mut new_index = 0;
@@ -324,7 +324,6 @@ fn event_emit(
         }
 
         events_obj.set(scope, event_key.into(), new_array.into());
-        break; // Only remove one at a time to avoid index issues
     }
 
     retval.set(v8::Boolean::new(scope, true).into());
