@@ -260,4 +260,3 @@ pub fn transpile_file_if_typescript<P: AsRef<Path>>(file_path: P) -> Result<Stri
     let transpiler = TypeScriptTranspiler::new();
     transpiler.transpile_file(file_path)
 }
-

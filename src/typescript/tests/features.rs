@@ -16,7 +16,7 @@ function createUser(data: User): User {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with interfaces
     assert!(result.is_ok());
 }
@@ -34,7 +34,7 @@ enum Color {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with enums
     assert!(result.is_ok());
 }
@@ -54,7 +54,7 @@ class Calculator {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with classes
     assert!(result.is_ok());
 }
@@ -78,7 +78,7 @@ class Container<T> {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with generics
     assert!(result.is_ok());
 }
@@ -88,9 +88,9 @@ fn test_arrow_function_handling() {
     let transpiler = TypeScriptTranspiler::new();
 
     let typescript = "const multiply = (a: number, b: number): number => a * b;";
-    
+
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with arrow functions
     assert!(result.is_ok());
 }
@@ -109,7 +109,7 @@ function processId(id: UserID): StringOrNumber {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with type aliases
     assert!(result.is_ok());
 }
@@ -130,7 +130,7 @@ class TestComponent {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with decorators
     assert!(result.is_ok());
 }
