@@ -63,7 +63,7 @@ pub fn setup_express(_scope: &mut v8::HandleScope, _context: v8::Local<v8::Conte
     Ok(())
 }
 
-fn create_express_app(
+pub fn create_express_app(
     scope: &mut v8::HandleScope,
     _args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
@@ -116,10 +116,22 @@ fn create_express_app(
     let static_function = static_template.get_function(scope).unwrap();
     app_obj.set(scope, static_key.into(), static_function.into());
 
+    // Add json middleware function
+    let json_key = v8::String::new(scope, "json").unwrap();
+    let json_template = v8::FunctionTemplate::new(scope, express_json);
+    let json_function = json_template.get_function(scope).unwrap();
+    app_obj.set(scope, json_key.into(), json_function.into());
+
+    // Add urlencoded middleware function
+    let urlencoded_key = v8::String::new(scope, "urlencoded").unwrap();
+    let urlencoded_template = v8::FunctionTemplate::new(scope, express_urlencoded);
+    let urlencoded_function = urlencoded_template.get_function(scope).unwrap();
+    app_obj.set(scope, urlencoded_key.into(), urlencoded_function.into());
+
     rv.set(app_obj.into());
 }
 
-fn create_router(
+pub fn create_router(
     scope: &mut v8::HandleScope,
     _args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
@@ -151,7 +163,7 @@ fn create_router(
     rv.set(router_obj.into());
 }
 
-fn express_static(
+pub fn express_static(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
@@ -190,6 +202,203 @@ fn express_static(
     middleware.set(scope, root_key.into(), root_value.into());
 
     rv.set(middleware.into());
+}
+
+pub fn express_json(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Create a JSON parser middleware function
+    let middleware_fn = v8::FunctionTemplate::new(scope, json_middleware_handler);
+    let middleware = middleware_fn.get_function(scope).unwrap();
+
+    rv.set(middleware.into());
+}
+
+pub fn express_urlencoded(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Create a URL-encoded parser middleware function
+    let middleware_fn = v8::FunctionTemplate::new(scope, urlencoded_middleware_handler);
+    let middleware = middleware_fn.get_function(scope).unwrap();
+
+    rv.set(middleware.into());
+}
+
+fn json_middleware_handler(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    // This middleware parses JSON request bodies
+    // args should be (req, res, next)
+    if args.length() < 3 {
+        return;
+    }
+
+    let req = args.get(0);
+    let _res = args.get(1);
+    let next = args.get(2);
+
+    // Parse JSON body if content-type is application/json
+    if let Ok(req_obj) = v8::Local::<v8::Object>::try_from(req) {
+        let content_type_key = v8::String::new(scope, "get").unwrap();
+        if let Some(get_fn) = req_obj.get(scope, content_type_key.into()) {
+            if let Ok(get_function) = v8::Local::<v8::Function>::try_from(get_fn) {
+                let content_type_arg = v8::String::new(scope, "content-type").unwrap();
+                let args = [content_type_arg.into()];
+                if let Some(content_type_val) = get_function.call(scope, req.into(), &args) {
+                    let content_type_str = content_type_val.to_string(scope).unwrap();
+                    let content_type = content_type_str.to_rust_string_lossy(scope);
+
+                    if content_type.contains("application/json") {
+                        // Parse JSON from body
+                        let body_key = v8::String::new(scope, "body").unwrap();
+                        if let Some(body_val) = req_obj.get(scope, body_key.into()) {
+                            let body_str = body_val.to_string(scope).unwrap();
+                            let body = body_str.to_rust_string_lossy(scope);
+
+                            if !body.is_empty() {
+                                if let Ok(parsed_json) =
+                                    serde_json::from_str::<serde_json::Value>(&body)
+                                {
+                                    let json_obj = json_to_v8_value(scope, &parsed_json);
+                                    req_obj.set(scope, body_key.into(), json_obj);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Call next middleware
+    if let Ok(next_fn) = v8::Local::<v8::Function>::try_from(next) {
+        let undefined = v8::undefined(scope);
+        next_fn.call(scope, undefined.into(), &[]);
+    }
+}
+
+fn urlencoded_middleware_handler(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    // This middleware parses URL-encoded request bodies
+    // args should be (req, res, next)
+    if args.length() < 3 {
+        return;
+    }
+
+    let req = args.get(0);
+    let _res = args.get(1);
+    let next = args.get(2);
+
+    // Parse URL-encoded body if content-type is application/x-www-form-urlencoded
+    if let Ok(req_obj) = v8::Local::<v8::Object>::try_from(req) {
+        let content_type_key = v8::String::new(scope, "get").unwrap();
+        if let Some(get_fn) = req_obj.get(scope, content_type_key.into()) {
+            if let Ok(get_function) = v8::Local::<v8::Function>::try_from(get_fn) {
+                let content_type_arg = v8::String::new(scope, "content-type").unwrap();
+                let args = [content_type_arg.into()];
+                if let Some(content_type_val) = get_function.call(scope, req.into(), &args) {
+                    let content_type_str = content_type_val.to_string(scope).unwrap();
+                    let content_type = content_type_str.to_rust_string_lossy(scope);
+
+                    if content_type.contains("application/x-www-form-urlencoded") {
+                        // Parse form data from body
+                        let body_key = v8::String::new(scope, "body").unwrap();
+                        if let Some(body_val) = req_obj.get(scope, body_key.into()) {
+                            let body_str = body_val.to_string(scope).unwrap();
+                            let body = body_str.to_rust_string_lossy(scope);
+
+                            if !body.is_empty() {
+                                let parsed_form = parse_urlencoded_body(&body);
+                                let form_obj = form_data_to_v8_object(scope, &parsed_form);
+                                req_obj.set(scope, body_key.into(), form_obj);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Call next middleware
+    if let Ok(next_fn) = v8::Local::<v8::Function>::try_from(next) {
+        let undefined = v8::undefined(scope);
+        next_fn.call(scope, undefined.into(), &[]);
+    }
+}
+
+fn json_to_v8_value<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    value: &serde_json::Value,
+) -> v8::Local<'a, v8::Value> {
+    match value {
+        serde_json::Value::Null => v8::null(scope).into(),
+        serde_json::Value::Bool(b) => v8::Boolean::new(scope, *b).into(),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                v8::Integer::new(scope, i as i32).into()
+            } else if let Some(f) = n.as_f64() {
+                v8::Number::new(scope, f).into()
+            } else {
+                v8::null(scope).into()
+            }
+        }
+        serde_json::Value::String(s) => v8::String::new(scope, s).unwrap().into(),
+        serde_json::Value::Array(arr) => {
+            let v8_array = v8::Array::new(scope, arr.len() as i32);
+            for (i, item) in arr.iter().enumerate() {
+                let v8_item = json_to_v8_value(scope, item);
+                v8_array.set_index(scope, i as u32, v8_item);
+            }
+            v8_array.into()
+        }
+        serde_json::Value::Object(obj) => {
+            let v8_obj = v8::Object::new(scope);
+            for (key, val) in obj {
+                let v8_key = v8::String::new(scope, key).unwrap();
+                let v8_val = json_to_v8_value(scope, val);
+                v8_obj.set(scope, v8_key.into(), v8_val);
+            }
+            v8_obj.into()
+        }
+    }
+}
+
+fn parse_urlencoded_body(body: &str) -> std::collections::HashMap<String, String> {
+    let mut result = std::collections::HashMap::new();
+
+    for pair in body.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            let decoded_key = urlencoding::decode(key).unwrap_or_default();
+            let decoded_value = urlencoding::decode(value).unwrap_or_default();
+            result.insert(decoded_key.to_string(), decoded_value.to_string());
+        }
+    }
+
+    result
+}
+
+fn form_data_to_v8_object<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    form_data: &std::collections::HashMap<String, String>,
+) -> v8::Local<'a, v8::Value> {
+    let v8_obj = v8::Object::new(scope);
+
+    for (key, value) in form_data {
+        let v8_key = v8::String::new(scope, key).unwrap();
+        let v8_value = v8::String::new(scope, value).unwrap();
+        v8_obj.set(scope, v8_key.into(), v8_value.into());
+    }
+
+    v8_obj.into()
 }
 
 fn static_middleware_handler(
@@ -302,18 +511,13 @@ fn app_use(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv
         let middleware_arg = args.get(start_index);
 
         if middleware_arg.is_function() {
-            // Convert function to string representation
-            let callback_code = format!(
-                "function middleware_{}(req, res, next) {{ \
-                    // Middleware logic placeholder \
-                    console.log('Middleware executed for: ' + req.url); \
-                    next(); \
-                }}",
-                start_index
-            );
+            // Convert V8 function to string for storage
+            let func_str = middleware_arg.to_string(scope).unwrap();
+            let callback_code = func_str.to_rust_string_lossy(scope);
 
-            // Check if this is an error handler (4 parameters)
-            let is_error_handler = false; // TODO: detect function arity
+            // Detect function arity for error handlers (4 params: err, req, res, next)
+            let is_error_handler =
+                callback_code.contains("function") && callback_code.matches(',').count() >= 3;
 
             let middleware = Middleware {
                 path_pattern: path_pattern.clone(),
@@ -322,7 +526,10 @@ fn app_use(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv
             };
 
             EXPRESS_MIDDLEWARE.lock().unwrap().push(middleware);
-            println!("Middleware registered for path: {}", path_pattern);
+            println!(
+                "Middleware registered for path: {} (error handler: {})",
+                path_pattern, is_error_handler
+            );
         }
 
         start_index += 1;
@@ -397,19 +604,51 @@ fn parse_route_pattern(path: &str) -> (String, Vec<String>) {
     let mut pattern = path.to_string();
     let mut param_names = Vec::new();
 
+    // Handle wildcard routes (*)
+    if pattern.contains('*') {
+        pattern = pattern.replace("*", "(.*)");
+    }
+
     // Find URL parameters like :id, :userId etc.
-    let param_regex = Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
+    let param_regex = Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)(\([^)]+\))?").unwrap();
 
     for cap in param_regex.captures_iter(path) {
         let param_name = cap[1].to_string();
         param_names.push(param_name);
 
-        // Replace :param with regex pattern
-        pattern = pattern.replace(&cap[0], "([^/]+)");
+        let full_match = &cap[0];
+
+        // Check if there's a custom regex pattern for this parameter
+        if let Some(custom_pattern) = cap.get(2) {
+            // Use custom pattern (without parentheses)
+            let custom = custom_pattern.as_str();
+            let clean_pattern = &custom[1..custom.len() - 1]; // Remove outer parentheses
+            pattern = pattern.replace(full_match, &format!("({})", clean_pattern));
+        } else {
+            // Default parameter pattern - matches anything except /
+            pattern = pattern.replace(full_match, "([^/]+)");
+        }
     }
 
-    // Escape other regex characters
-    pattern = pattern.replace(".", "\\.");
+    // Handle optional parameters like (:id)?
+    let optional_regex = Regex::new(r"\(([^)]*):([a-zA-Z_][a-zA-Z0-9_]*)\)\?").unwrap();
+    for cap in optional_regex.captures_iter(&pattern.clone()) {
+        let param_name = cap[2].to_string();
+        if !param_names.contains(&param_name) {
+            param_names.push(param_name);
+        }
+        let full_match = &cap[0];
+        let prefix = &cap[1];
+        pattern = pattern.replace(full_match, &format!("(?:{}([^/]+))?", prefix));
+    }
+
+    // Escape other regex special characters
+    let chars_to_escape = ["."];
+    for ch in chars_to_escape {
+        pattern = pattern.replace(ch, &format!("\\{}", ch));
+    }
+
+    // Add anchors
     pattern = format!("^{}$", pattern);
 
     (pattern, param_names)
@@ -477,11 +716,49 @@ async fn handle_express_request(req: Request<Body>) -> Result<Response<Body>, In
         .unwrap_or_default();
     let body = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
 
+    // Create request context
+    let request_context = RequestContext {
+        method: method.clone(),
+        path: path.clone(),
+        query,
+        params: HashMap::new(),
+        headers,
+        body,
+    };
+
+    // Execute middleware chain first
+    let mut response_context = ResponseContext::default();
+    let middleware_result = execute_middleware_chain(&request_context, &mut response_context).await;
+
+    // If middleware handled the response, return it
+    if middleware_result.is_err() || response_context.body != "" {
+        return Ok(Response::builder()
+            .status(response_context.status)
+            .header(
+                "content-type",
+                response_context
+                    .headers
+                    .get("content-type")
+                    .unwrap_or(&"application/json".to_string()),
+            )
+            .header("access-control-allow-origin", "*")
+            .body(Body::from(response_context.body))
+            .unwrap());
+    }
+
     // Try to match route
     if let Some((route, params)) = match_route(&method, &path) {
         // Execute route with proper req/res objects
-        let response_data =
-            execute_route_callback(&route, &method, &path, query, params, headers, &body).await;
+        let response_data = execute_route_callback(
+            &route,
+            &method,
+            &path,
+            request_context.query,
+            params,
+            request_context.headers,
+            &request_context.body,
+        )
+        .await;
 
         return Ok(Response::builder()
             .status(response_data.0)
@@ -660,6 +937,211 @@ async fn execute_route_callback(
     .to_string();
 
     (200, headers, fallback_body)
+}
+
+async fn execute_middleware_chain(
+    request: &RequestContext,
+    response: &mut ResponseContext,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let middleware_list = EXPRESS_MIDDLEWARE.lock().unwrap().clone();
+
+    for middleware in &middleware_list {
+        // Check if middleware path pattern matches current request path
+        if should_execute_middleware(&middleware.path_pattern, &request.path) {
+            // Execute middleware
+            let middleware_result = execute_middleware(middleware, request, response).await;
+
+            match middleware_result {
+                Ok(should_continue) => {
+                    if !should_continue {
+                        // Middleware called res.send() or similar, stop chain
+                        break;
+                    }
+                }
+                Err(_) => {
+                    // Error in middleware, stop chain
+                    response.status = 500;
+                    response.body = json!({
+                        "error": "Internal Server Error",
+                        "message": "Middleware execution failed"
+                    })
+                    .to_string();
+                    return Err("Middleware error".into());
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn should_execute_middleware(pattern: &str, path: &str) -> bool {
+    match pattern {
+        "*" => true, // Global middleware
+        p if p.ends_with("/*") => {
+            let prefix = &p[..p.len() - 2];
+            path.starts_with(prefix)
+        }
+        p => path == p || path.starts_with(&format!("{}/", p)),
+    }
+}
+
+async fn execute_middleware(
+    middleware: &Middleware,
+    request: &RequestContext,
+    response: &mut ResponseContext,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    use crate::runtime::engine::Engine;
+
+    let mut engine = Engine::new()?;
+
+    // Create middleware execution context
+    let middleware_code = format!(
+        r#"
+        (function() {{
+            let nextCalled = false;
+            let responseSent = false;
+            
+            // Create req object
+            const req = {{
+                method: '{}',
+                path: '{}',
+                url: '{}',
+                params: {},
+                query: {},
+                headers: {},
+                body: {},
+                get: function(name) {{ return this.headers[name.toLowerCase()]; }},
+                timestamp: Date.now(),
+                apiCall: false,
+                isAdmin: false,
+                authenticated: false,
+                authorized: false
+            }};
+            
+            // Create res object
+            const res = {{
+                _statusCode: {},
+                _headers: {},
+                _body: '{}',
+                _finished: false,
+                status: function(code) {{ 
+                    this._statusCode = code; 
+                    return this; 
+                }},
+                json: function(data) {{ 
+                    this._headers['content-type'] = 'application/json';
+                    this._body = JSON.stringify(data);
+                    this._finished = true;
+                    responseSent = true;
+                    return this;
+                }},
+                send: function(data) {{ 
+                    if (!this._headers['content-type']) {{
+                        this._headers['content-type'] = 'text/html';
+                    }}
+                    this._body = String(data);
+                    this._finished = true;
+                    responseSent = true;
+                    return this;
+                }},
+                set: function(name, value) {{ 
+                    this._headers[name.toLowerCase()] = value; 
+                    return this; 
+                }},
+                header: function(name, value) {{ return this.set(name, value); }},
+                end: function(data) {{ 
+                    if (data !== undefined) this._body = String(data);
+                    this._finished = true;
+                    responseSent = true;
+                }}
+            }};
+            
+            // Create next function
+            const next = function(err) {{
+                if (err) {{
+                    throw new Error(err);
+                }}
+                nextCalled = true;
+            }};
+            
+            // Execute middleware function
+            try {{
+                const middlewareFunction = {};
+                if (typeof middlewareFunction === 'function') {{
+                    middlewareFunction(req, res, next);
+                }}
+            }} catch (error) {{
+                return {{
+                    error: error.message,
+                    nextCalled: false,
+                    responseSent: false
+                }};
+            }}
+            
+            // Return execution result
+            return {{
+                nextCalled: nextCalled,
+                responseSent: responseSent,
+                statusCode: res._statusCode,
+                headers: res._headers,
+                body: res._body,
+                req: {{
+                    timestamp: req.timestamp,
+                    apiCall: req.apiCall,
+                    isAdmin: req.isAdmin,
+                    authenticated: req.authenticated,
+                    authorized: req.authorized
+                }}
+            }};
+        }})()
+        "#,
+        request.method,
+        request.path,
+        request.path,
+        serde_json::to_string(&request.params)?,
+        serde_json::to_string(&request.query)?,
+        serde_json::to_string(&request.headers)?,
+        serde_json::to_string(&request.body)?,
+        response.status,
+        serde_json::to_string(&response.headers)?,
+        response.body,
+        middleware.callback_code
+    );
+
+    match engine.execute(&middleware_code) {
+        Ok(result) => {
+            if let Ok(execution_data) = serde_json::from_str::<serde_json::Value>(&result) {
+                let next_called = execution_data["nextCalled"].as_bool().unwrap_or(false);
+                let response_sent = execution_data["responseSent"].as_bool().unwrap_or(false);
+
+                // Update response if middleware set values
+                if response_sent {
+                    response.status = execution_data["statusCode"].as_u64().unwrap_or(200) as u16;
+                    response.body = execution_data["body"].as_str().unwrap_or("").to_string();
+
+                    if let Some(headers_obj) = execution_data["headers"].as_object() {
+                        for (key, value) in headers_obj {
+                            if let Some(value_str) = value.as_str() {
+                                response.headers.insert(key.clone(), value_str.to_string());
+                            }
+                        }
+                    }
+                    return Ok(false); // Stop middleware chain
+                }
+
+                // Continue to next middleware if next() was called
+                return Ok(next_called);
+            }
+        }
+        Err(e) => {
+            println!("Middleware execution error: {}", e);
+            return Err(format!("Middleware execution failed: {}", e).into());
+        }
+    }
+
+    // Default: continue to next middleware
+    Ok(true)
 }
 
 pub fn clear_express_routes() {
