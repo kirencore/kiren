@@ -1,8 +1,8 @@
 use anyhow::Result;
-use std::path::PathBuf;
-use tokio::fs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use tokio::fs;
 
 use super::manager::Package;
 use super::resolver::PackageSpec;
@@ -32,16 +32,14 @@ impl GlobalCache {
         // Create cache directory if it doesn't exist
         std::fs::create_dir_all(&cache_dir)?;
 
-        Ok(Self {
-            cache_dir,
-        })
+        Ok(Self { cache_dir })
     }
 
     /// Check if package exists in cache
     pub async fn get(&self, spec: &PackageSpec) -> Result<Option<Package>> {
         let package_dir = self.get_package_dir(&spec.name, "latest"); // Simplified for now
         let package_file = package_dir.join("package.toml");
-        
+
         if package_file.exists() {
             let content = fs::read_to_string(&package_file).await?;
             let package: Package = toml::from_str(&content)?;
@@ -54,19 +52,19 @@ impl GlobalCache {
     /// Store package in cache
     pub async fn store(&self, package: &Package) -> Result<()> {
         let package_dir = self.get_package_dir(&package.name, &package.version);
-        
+
         // Create package directory
         fs::create_dir_all(&package_dir).await?;
-        
+
         // Write package metadata
         let package_file = package_dir.join("package.toml");
         let package_content = toml::to_string_pretty(package)?;
         fs::write(&package_file, package_content).await?;
-        
+
         // Create lib directory structure (simplified)
         let lib_dir = package_dir.join("lib");
         fs::create_dir_all(&lib_dir).await?;
-        
+
         // For now, create a simple main file
         // In production, this would extract from downloaded package
         let main_file = lib_dir.join(&package.main);
@@ -77,7 +75,7 @@ impl GlobalCache {
             );
             fs::write(&main_file, default_content).await?;
         }
-        
+
         println!("📦 Cached package: {}@{}", package.name, package.version);
         Ok(())
     }

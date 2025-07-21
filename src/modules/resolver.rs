@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde_json::Value;
 
 /// Module resolution result
 #[derive(Debug, Clone)]
@@ -75,7 +75,8 @@ impl ModuleResolver {
         };
 
         // 3. Handle different types of specifiers
-        if specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with("/") {
+        if specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with("/")
+        {
             // Relative or absolute path
             self.resolve_file_or_directory(&from_dir, specifier)
         } else {
@@ -87,11 +88,38 @@ impl ModuleResolver {
     /// Resolve built-in Node.js modules
     fn resolve_builtin(&self, specifier: &str) -> Option<ResolvedModule> {
         let builtin_modules = [
-            "fs", "path", "http", "https", "url", "querystring", "crypto",
-            "os", "util", "events", "stream", "buffer", "assert", "child_process",
-            "cluster", "console", "constants", "dgram", "dns", "domain",
-            "module", "net", "process", "readline", "repl", "string_decoder",
-            "sys", "timers", "tls", "tty", "vm", "zlib"
+            "fs",
+            "path",
+            "http",
+            "https",
+            "url",
+            "querystring",
+            "crypto",
+            "os",
+            "util",
+            "events",
+            "stream",
+            "buffer",
+            "assert",
+            "child_process",
+            "cluster",
+            "console",
+            "constants",
+            "dgram",
+            "dns",
+            "domain",
+            "module",
+            "net",
+            "process",
+            "readline",
+            "repl",
+            "string_decoder",
+            "sys",
+            "timers",
+            "tls",
+            "tty",
+            "vm",
+            "zlib",
         ];
 
         if builtin_modules.contains(&specifier) {
@@ -106,7 +134,11 @@ impl ModuleResolver {
     }
 
     /// Resolve file or directory (relative/absolute paths)
-    fn resolve_file_or_directory(&mut self, from_dir: &Path, specifier: &str) -> Result<ResolvedModule> {
+    fn resolve_file_or_directory(
+        &mut self,
+        from_dir: &Path,
+        specifier: &str,
+    ) -> Result<ResolvedModule> {
         let target_path = if specifier.starts_with('/') {
             PathBuf::from(specifier)
         } else {
@@ -135,12 +167,12 @@ impl ModuleResolver {
             let node_modules = current_dir.join("node_modules");
             if node_modules.exists() {
                 let module_path = node_modules.join(specifier);
-                
+
                 // Try as file first
                 if let Ok(resolved) = self.try_file(&module_path) {
                     return Ok(resolved);
                 }
-                
+
                 // Try as directory with package.json
                 if module_path.is_dir() {
                     if let Ok(resolved) = self.try_package(&module_path) {
@@ -190,7 +222,7 @@ impl ModuleResolver {
             if path_with_ext.is_file() {
                 return self.load_file(&path_with_ext);
             }
-            
+
             // Also try adding extension to existing path
             let mut path_str = path.to_string_lossy().to_string();
             path_str.push_str(ext);
@@ -212,13 +244,16 @@ impl ModuleResolver {
             }
         }
 
-        Err(anyhow!("No index file found in directory: {}", dir_path.display()))
+        Err(anyhow!(
+            "No index file found in directory: {}",
+            dir_path.display()
+        ))
     }
 
     /// Try to resolve a package directory using package.json
     fn try_package(&mut self, package_dir: &Path) -> Result<ResolvedModule> {
         let package_json_path = package_dir.join("package.json");
-        
+
         if !package_json_path.is_file() {
             return Err(anyhow!("No package.json found"));
         }
@@ -229,15 +264,25 @@ impl ModuleResolver {
         } else {
             let content = std::fs::read_to_string(&package_json_path)?;
             let parsed: Value = serde_json::from_str(&content)?;
-            
+
             let package_info = PackageJson {
-                main: parsed.get("main").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                module: parsed.get("module").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                main: parsed
+                    .get("main")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                module: parsed
+                    .get("module")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
                 exports: parsed.get("exports").cloned(),
-                module_type: parsed.get("type").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                module_type: parsed
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             };
-            
-            self.package_cache.insert(package_dir.to_path_buf(), package_info.clone());
+
+            self.package_cache
+                .insert(package_dir.to_path_buf(), package_info.clone());
             package_info
         };
 
@@ -314,7 +359,7 @@ mod tests {
     #[test]
     fn test_builtin_resolution() {
         let mut resolver = ModuleResolver::new();
-        
+
         let result = resolver.resolve("fs", None).unwrap();
         assert_eq!(result.module_type, ModuleType::BuiltIn);
         assert_eq!(result.path, PathBuf::from("node:fs"));
@@ -337,18 +382,33 @@ mod tests {
     #[test]
     fn test_module_type_detection() {
         let resolver = ModuleResolver::new();
-        
+
         // ES Module detection
         let es_content = "import { foo } from 'bar';";
-        assert_eq!(resolver.detect_module_type(Path::new("test.js"), es_content), ModuleType::ESModule);
-        
+        assert_eq!(
+            resolver.detect_module_type(Path::new("test.js"), es_content),
+            ModuleType::ESModule
+        );
+
         // CommonJS detection
         let cjs_content = "const foo = require('bar');";
-        assert_eq!(resolver.detect_module_type(Path::new("test.js"), cjs_content), ModuleType::CommonJS);
-        
+        assert_eq!(
+            resolver.detect_module_type(Path::new("test.js"), cjs_content),
+            ModuleType::CommonJS
+        );
+
         // Extension-based detection
-        assert_eq!(resolver.detect_module_type(Path::new("test.mjs"), ""), ModuleType::ESModule);
-        assert_eq!(resolver.detect_module_type(Path::new("test.cjs"), ""), ModuleType::CommonJS);
-        assert_eq!(resolver.detect_module_type(Path::new("test.json"), ""), ModuleType::JSON);
+        assert_eq!(
+            resolver.detect_module_type(Path::new("test.mjs"), ""),
+            ModuleType::ESModule
+        );
+        assert_eq!(
+            resolver.detect_module_type(Path::new("test.cjs"), ""),
+            ModuleType::CommonJS
+        );
+        assert_eq!(
+            resolver.detect_module_type(Path::new("test.json"), ""),
+            ModuleType::JSON
+        );
     }
 }

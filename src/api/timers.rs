@@ -131,7 +131,11 @@ fn execute_string_callback(scope: &mut v8::HandleScope, callback: &TimerCallback
 }
 
 // Execute function callback in proper scope
-fn execute_function_callback(scope: &mut v8::HandleScope, callback: &TimerCallback, function_source: &str) -> Result<()> {
+fn execute_function_callback(
+    scope: &mut v8::HandleScope,
+    callback: &TimerCallback,
+    function_source: &str,
+) -> Result<()> {
     // Get the current context
     let context = scope.get_current_context();
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -350,9 +354,13 @@ fn set_interval(
             // Execute callback immediately in this thread
             let callback_data = {
                 let callbacks = CALLBACKS.lock().unwrap();
-                callbacks
-                    .get(&interval_id)
-                    .map(|cb_info| (cb_info.is_function, cb_info.callback_source.clone(), cb_info.function_source.clone()))
+                callbacks.get(&interval_id).map(|cb_info| {
+                    (
+                        cb_info.is_function,
+                        cb_info.callback_source.clone(),
+                        cb_info.function_source.clone(),
+                    )
+                })
             };
 
             let should_continue = match callback_data {

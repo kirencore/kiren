@@ -1,7 +1,7 @@
 use anyhow::Result;
-use v8;
-use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
+use std::sync::{Arc, Mutex};
+use v8;
 
 // Console level constants
 const LEVEL_DEBUG: u8 = 0;
@@ -10,9 +10,8 @@ const LEVEL_WARN: u8 = 2;
 const LEVEL_ERROR: u8 = 3;
 
 // Global logging configuration
-static CONSOLE_CONFIG: Lazy<Arc<Mutex<ConsoleConfig>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(ConsoleConfig::default()))
-});
+static CONSOLE_CONFIG: Lazy<Arc<Mutex<ConsoleConfig>>> =
+    Lazy::new(|| Arc::new(Mutex::new(ConsoleConfig::default())));
 
 #[derive(Debug, Clone)]
 pub struct ConsoleConfig {
@@ -125,9 +124,9 @@ fn should_log(level: u8) -> bool {
 
 fn format_message(level: &str, message: &str) -> String {
     let config = CONSOLE_CONFIG.lock().unwrap();
-    
+
     let mut formatted = String::new();
-    
+
     if config.timestamp {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -138,9 +137,12 @@ fn format_message(level: &str, message: &str) -> String {
         let hours = time / 3600;
         let minutes = (time % 3600) / 60;
         let seconds = time % 60;
-        formatted.push_str(&format!("[{:02}:{:02}:{:02}.{:03}] ", hours, minutes, seconds, millis));
+        formatted.push_str(&format!(
+            "[{:02}:{:02}:{:02}.{:03}] ",
+            hours, minutes, seconds, millis
+        ));
     }
-    
+
     if config.colors {
         let colored_level = match level {
             "DEBUG" => format!("\x1b[36m{}\x1b[0m", level), // Cyan
@@ -153,7 +155,7 @@ fn format_message(level: &str, message: &str) -> String {
     } else {
         formatted.push_str(&format!("[{}] ", level));
     }
-    
+
     formatted.push_str(message);
     formatted
 }
@@ -166,7 +168,7 @@ fn console_log(
     if !should_log(LEVEL_INFO) {
         return;
     }
-    
+
     let message = format_args(scope, &args);
     println!("{}", format_message("INFO", &message));
 }
@@ -179,7 +181,7 @@ fn console_info(
     if !should_log(LEVEL_INFO) {
         return;
     }
-    
+
     let message = format_args(scope, &args);
     println!("{}", format_message("INFO", &message));
 }
@@ -192,7 +194,7 @@ fn console_warn(
     if !should_log(LEVEL_WARN) {
         return;
     }
-    
+
     let message = format_args(scope, &args);
     eprintln!("{}", format_message("WARN", &message));
 }
@@ -205,7 +207,7 @@ fn console_error(
     if !should_log(LEVEL_ERROR) {
         return;
     }
-    
+
     let message = format_args(scope, &args);
     eprintln!("{}", format_message("ERROR", &message));
 }
@@ -218,7 +220,7 @@ fn console_debug(
     if !should_log(LEVEL_DEBUG) {
         return;
     }
-    
+
     let message = format_args(scope, &args);
     println!("{}", format_message("DEBUG", &message));
 }
@@ -231,10 +233,10 @@ fn console_trace(
     if !should_log(LEVEL_INFO) {
         return;
     }
-    
+
     let message = format_args(scope, &args);
     eprintln!("{}", format_message("TRACE", &message));
-    
+
     // Get stack trace - simplified approach
     eprintln!("    at trace (console.trace)");
 }
@@ -247,10 +249,11 @@ fn console_assert(
     if args.length() == 0 {
         return;
     }
-    
+
     let condition = args.get(0);
-    let is_truthy = condition.is_true() || (!condition.is_false() && !condition.is_null_or_undefined());
-    
+    let is_truthy =
+        condition.is_true() || (!condition.is_false() && !condition.is_null_or_undefined());
+
     if !is_truthy {
         let message = if args.length() > 1 {
             let mut parts = Vec::new();
@@ -263,7 +266,7 @@ fn console_assert(
         } else {
             "Assertion failed".to_string()
         };
-        
+
         eprintln!("{}", format_message("ERROR", &message));
     }
 }
@@ -284,7 +287,7 @@ fn format_args(scope: &mut v8::HandleScope, args: &v8::FunctionCallbackArguments
             output.push(' ');
         }
         let arg = args.get(i);
-        
+
         // Handle different types
         if arg.is_string() {
             let str_val = arg.to_string(scope).unwrap();
@@ -293,16 +296,19 @@ fn format_args(scope: &mut v8::HandleScope, args: &v8::FunctionCallbackArguments
             // Try to stringify objects
             let json_key = v8::String::new(scope, "JSON").unwrap();
             let global = scope.get_current_context().global(scope);
-            
+
             if let Some(json_obj) = global.get(scope, json_key.into()) {
                 if let Some(json_obj) = json_obj.to_object(scope) {
                     let stringify_key = v8::String::new(scope, "stringify").unwrap();
                     if let Some(stringify_fn) = json_obj.get(scope, stringify_key.into()) {
                         if let Some(stringify_fn) = stringify_fn.to_object(scope) {
                             if stringify_fn.is_function() {
-                                let stringify_fn = v8::Local::<v8::Function>::try_from(stringify_fn).unwrap();
+                                let stringify_fn =
+                                    v8::Local::<v8::Function>::try_from(stringify_fn).unwrap();
                                 let args_array = [arg];
-                                if let Some(result) = stringify_fn.call(scope, json_obj.into(), &args_array) {
+                                if let Some(result) =
+                                    stringify_fn.call(scope, json_obj.into(), &args_array)
+                                {
                                     let str_val = result.to_string(scope).unwrap();
                                     output.push_str(&str_val.to_rust_string_lossy(scope));
                                     continue;
@@ -312,7 +318,7 @@ fn format_args(scope: &mut v8::HandleScope, args: &v8::FunctionCallbackArguments
                     }
                 }
             }
-            
+
             // Fallback to toString
             let str_val = arg.to_string(scope).unwrap();
             output.push_str(&str_val.to_rust_string_lossy(scope));

@@ -1,6 +1,6 @@
+use crate::api::http;
 use anyhow::Result;
 use v8;
-use crate::api::http;
 
 // Simplified ES Modules support
 pub fn setup_es_modules(
@@ -33,7 +33,6 @@ fn dynamic_import(
     let specifier_arg = args.get(0);
     let specifier_str = specifier_arg.to_string(scope).unwrap();
     let specifier = specifier_str.to_rust_string_lossy(scope);
-    
 
     // Create a promise for async module loading
     let resolver = v8::PromiseResolver::new(scope).unwrap();
@@ -104,10 +103,11 @@ fn dynamic_import(
 
             // createServer fonksiyonunu direkt API'dan al
             let create_server_key = v8::String::new(scope, "createServer").unwrap();
-            let create_server_tmpl = v8::FunctionTemplate::new(scope, crate::api::http::create_server);
+            let create_server_tmpl =
+                v8::FunctionTemplate::new(scope, crate::api::http::create_server);
             let create_server_fn = create_server_tmpl.get_function(scope).unwrap();
             http_module.set(scope, create_server_key.into(), create_server_fn.into());
-            
+
             resolver.resolve(scope, http_module.into());
         }
         _ => {
@@ -120,11 +120,11 @@ fn dynamic_import(
                 Ok(source) => {
                     // Simplified module loading - just execute and return the result
                     let transformed_source = transform_module_to_commonjs(&source);
-                    
+
                     // Execute the transformed source
                     let source_str = v8::String::new(scope, &transformed_source).unwrap();
                     let script = v8::Script::compile(scope, source_str, None);
-                    
+
                     if let Some(script) = script {
                         if let Some(result) = script.run(scope) {
                             // Return the executed module result
@@ -179,32 +179,39 @@ fn resolve_module_path(base_path: &std::path::Path, specifier: &str) -> Result<s
 fn transform_module_to_commonjs(source: &str) -> String {
     let mut transformed = source.to_string();
     let mut exports = Vec::new();
-    
+
     // Transform export function declarations
     if let Ok(export_fn_regex) = regex::Regex::new(r"export\s+function\s+(\w+)") {
         for caps in export_fn_regex.captures_iter(source) {
             exports.push(format!("{}: {}", &caps[1], &caps[1]));
         }
-        transformed = export_fn_regex.replace_all(&transformed, "function $1").to_string();
+        transformed = export_fn_regex
+            .replace_all(&transformed, "function $1")
+            .to_string();
     }
-    
+
     // Transform export const/let declarations
     if let Ok(export_const_regex) = regex::Regex::new(r"export\s+(?:const|let)\s+(\w+)") {
         for caps in export_const_regex.captures_iter(source) {
             exports.push(format!("{}: {}", &caps[1], &caps[1]));
         }
-        transformed = export_const_regex.replace_all(&transformed, "const $1").to_string();
+        transformed = export_const_regex
+            .replace_all(&transformed, "const $1")
+            .to_string();
     }
-    
+
     // Transform export default
     if transformed.contains("export default") {
         transformed = transformed.replace("export default", "const __default_export =");
         exports.push("default: __default_export".to_string());
     }
-    
+
     // Add module.exports at the end
     if !exports.is_empty() {
-        transformed += &format!("\n\n// Return module exports\nreturn {{ {} }};", exports.join(", "));
+        transformed += &format!(
+            "\n\n// Return module exports\nreturn {{ {} }};",
+            exports.join(", ")
+        );
         // Wrap in IIFE to capture return value
         transformed = format!("(function() {{\n{}\n}})()", transformed);
     } else {
@@ -212,7 +219,7 @@ fn transform_module_to_commonjs(source: &str) -> String {
         transformed += "\nreturn {};";
         transformed = format!("(function() {{\n{}\n}})()", transformed);
     }
-    
+
     transformed
 }
 
@@ -337,19 +344,19 @@ fn create_server_from_global(
 ) {
     // Global context'den http.createServer'ı çağır
     let global = scope.get_current_context().global(scope);
-    
+
     // http objesini al
     let http_key = v8::String::new(scope, "http").unwrap();
     if let Some(http_obj) = global.get(scope, http_key.into()) {
         if let Ok(http_obj) = http_obj.try_into() {
             let http_obj: v8::Local<v8::Object> = http_obj;
-            
+
             // createServer fonksiyonunu al
             let create_server_key = v8::String::new(scope, "createServer").unwrap();
             if let Some(create_server_fn) = http_obj.get(scope, create_server_key.into()) {
                 if let Ok(create_server_fn) = create_server_fn.try_into() {
                     let create_server_fn: v8::Local<v8::Function> = create_server_fn;
-                    
+
                     // Fonksiyonu çağır
                     let args = [];
                     if let Some(result) = create_server_fn.call(scope, http_obj.into(), &args) {
@@ -360,7 +367,7 @@ fn create_server_from_global(
             }
         }
     }
-    
+
     // Fallback: empty object if global API is not available
     let empty_obj = v8::Object::new(scope);
     rv.set(empty_obj.into());
@@ -375,22 +382,22 @@ fn fs_read_file_from_global(
     // Global fs.readFile'ı çağır
     let global = scope.get_current_context().global(scope);
     let fs_key = v8::String::new(scope, "fs").unwrap();
-    
+
     if let Some(fs_obj) = global.get(scope, fs_key.into()) {
         if let Ok(fs_obj) = fs_obj.try_into() {
             let fs_obj: v8::Local<v8::Object> = fs_obj;
             let read_file_key = v8::String::new(scope, "readFile").unwrap();
-            
+
             if let Some(read_file_fn) = fs_obj.get(scope, read_file_key.into()) {
                 if let Ok(read_file_fn) = read_file_fn.try_into() {
                     let read_file_fn: v8::Local<v8::Function> = read_file_fn;
-                    
+
                     // Argumentları forward et
                     let mut call_args = Vec::new();
                     for i in 0..args.length() {
                         call_args.push(args.get(i));
                     }
-                    
+
                     if let Some(result) = read_file_fn.call(scope, fs_obj.into(), &call_args) {
                         rv.set(result);
                         return;
@@ -399,7 +406,7 @@ fn fs_read_file_from_global(
             }
         }
     }
-    
+
     // Fallback
     let error = v8::String::new(scope, "FS module not available").unwrap();
     let exception = v8::Exception::error(scope, error);
@@ -413,21 +420,21 @@ fn fs_write_file_from_global(
 ) {
     let global = scope.get_current_context().global(scope);
     let fs_key = v8::String::new(scope, "fs").unwrap();
-    
+
     if let Some(fs_obj) = global.get(scope, fs_key.into()) {
         if let Ok(fs_obj) = fs_obj.try_into() {
             let fs_obj: v8::Local<v8::Object> = fs_obj;
             let write_file_key = v8::String::new(scope, "writeFile").unwrap();
-            
+
             if let Some(write_file_fn) = fs_obj.get(scope, write_file_key.into()) {
                 if let Ok(write_file_fn) = write_file_fn.try_into() {
                     let write_file_fn: v8::Local<v8::Function> = write_file_fn;
-                    
+
                     let mut call_args = Vec::new();
                     for i in 0..args.length() {
                         call_args.push(args.get(i));
                     }
-                    
+
                     if let Some(result) = write_file_fn.call(scope, fs_obj.into(), &call_args) {
                         rv.set(result);
                         return;
@@ -436,7 +443,7 @@ fn fs_write_file_from_global(
             }
         }
     }
-    
+
     let error = v8::String::new(scope, "FS module not available").unwrap();
     let exception = v8::Exception::error(scope, error);
     scope.throw_exception(exception);
@@ -449,21 +456,21 @@ fn fs_exists_from_global(
 ) {
     let global = scope.get_current_context().global(scope);
     let fs_key = v8::String::new(scope, "fs").unwrap();
-    
+
     if let Some(fs_obj) = global.get(scope, fs_key.into()) {
         if let Ok(fs_obj) = fs_obj.try_into() {
             let fs_obj: v8::Local<v8::Object> = fs_obj;
             let exists_key = v8::String::new(scope, "exists").unwrap();
-            
+
             if let Some(exists_fn) = fs_obj.get(scope, exists_key.into()) {
                 if let Ok(exists_fn) = exists_fn.try_into() {
                     let exists_fn: v8::Local<v8::Function> = exists_fn;
-                    
+
                     let mut call_args = Vec::new();
                     for i in 0..args.length() {
                         call_args.push(args.get(i));
                     }
-                    
+
                     if let Some(result) = exists_fn.call(scope, fs_obj.into(), &call_args) {
                         rv.set(result);
                         return;
@@ -472,7 +479,7 @@ fn fs_exists_from_global(
             }
         }
     }
-    
+
     rv.set(v8::Boolean::new(scope, false).into());
 }
 
@@ -483,21 +490,21 @@ fn fs_mkdir_from_global(
 ) {
     let global = scope.get_current_context().global(scope);
     let fs_key = v8::String::new(scope, "fs").unwrap();
-    
+
     if let Some(fs_obj) = global.get(scope, fs_key.into()) {
         if let Ok(fs_obj) = fs_obj.try_into() {
             let fs_obj: v8::Local<v8::Object> = fs_obj;
             let mkdir_key = v8::String::new(scope, "mkdir").unwrap();
-            
+
             if let Some(mkdir_fn) = fs_obj.get(scope, mkdir_key.into()) {
                 if let Ok(mkdir_fn) = mkdir_fn.try_into() {
                     let mkdir_fn: v8::Local<v8::Function> = mkdir_fn;
-                    
+
                     let mut call_args = Vec::new();
                     for i in 0..args.length() {
                         call_args.push(args.get(i));
                     }
-                    
+
                     if let Some(result) = mkdir_fn.call(scope, fs_obj.into(), &call_args) {
                         rv.set(result);
                         return;
@@ -506,7 +513,7 @@ fn fs_mkdir_from_global(
             }
         }
     }
-    
+
     let error = v8::String::new(scope, "FS module not available").unwrap();
     let exception = v8::Exception::error(scope, error);
     scope.throw_exception(exception);

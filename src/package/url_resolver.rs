@@ -1,10 +1,10 @@
+use ada_url::Url;
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
-use ada_url::Url;
 
 use super::cache::GlobalCache;
 
@@ -53,16 +53,18 @@ impl UrlResolver {
 
         // Check disk cache
         if let Some(cached_module) = self.load_from_disk_cache(&canonical_url).await? {
-            self.url_cache.insert(canonical_url.to_string(), cached_module.clone());
+            self.url_cache
+                .insert(canonical_url.to_string(), cached_module.clone());
             return Ok(cached_module);
         }
 
         // Fetch from network
         let module = self.fetch_from_network(&canonical_url).await?;
-        
+
         // Store in both caches
         self.store_in_disk_cache(&canonical_url, &module).await?;
-        self.url_cache.insert(canonical_url.to_string(), module.clone());
+        self.url_cache
+            .insert(canonical_url.to_string(), module.clone());
 
         Ok(module)
     }
@@ -70,9 +72,13 @@ impl UrlResolver {
     /// Fetch module from network
     async fn fetch_from_network(&self, url: &str) -> Result<UrlModule> {
         let response = self.client.get(url).send().await?;
-        
+
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Failed to fetch {}: {}", url, response.status()));
+            return Err(anyhow::anyhow!(
+                "Failed to fetch {}: {}",
+                url,
+                response.status()
+            ));
         }
 
         let content_type = response
@@ -110,7 +116,7 @@ impl UrlResolver {
     /// Extract import URLs from module content
     fn extract_dependencies(&self, content: &str) -> Vec<String> {
         let mut dependencies = Vec::new();
-        
+
         // Match import statements with URLs
         let import_regex = regex::Regex::new(r#"import\s+.*\s+from\s+["']([^"']+)["']"#).unwrap();
         for cap in import_regex.captures_iter(content) {
@@ -140,18 +146,18 @@ impl UrlResolver {
     /// Load module from disk cache
     async fn load_from_disk_cache(&self, url: &str) -> Result<Option<UrlModule>> {
         let cache_path = self.get_cache_path(url);
-        
+
         if !cache_path.exists() {
             return Ok(None);
         }
 
         let content = fs::read_to_string(&cache_path).await?;
         let module: UrlModule = serde_json::from_str(&content)?;
-        
+
         // Check if cache is still valid (simple TTL check)
         let metadata = fs::metadata(&cache_path).await?;
         let age = metadata.modified()?.elapsed().unwrap_or_default();
-        
+
         // Cache expires after 1 hour for development, 24 hours for production
         let ttl = if cfg!(debug_assertions) {
             std::time::Duration::from_secs(3600) // 1 hour
@@ -169,14 +175,14 @@ impl UrlResolver {
     /// Store module in disk cache
     async fn store_in_disk_cache(&self, url: &str, module: &UrlModule) -> Result<()> {
         let cache_path = self.get_cache_path(url);
-        
+
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).await?;
         }
 
         let content = serde_json::to_string_pretty(module)?;
         fs::write(&cache_path, content).await?;
-        
+
         Ok(())
     }
 
@@ -189,12 +195,12 @@ impl UrlResolver {
             .replace("?", "_")
             .replace("&", "_")
             .replace("=", "_");
-        
+
         let cache_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".kiren")
             .join("url_cache");
-            
+
         cache_dir.join(format!("{}.json", safe_name))
     }
 
@@ -205,7 +211,7 @@ impl UrlResolver {
         }
 
         let base = Url::parse(Box::leak(base_url.to_string().into_boxed_str()), None)?;
-        
+
         // Manual URL joining for ada-url
         let resolved_url = if relative_url.starts_with("/") {
             // Absolute path
@@ -220,9 +226,15 @@ impl UrlResolver {
                 parts.pop(); // Remove filename
                 parts.join("/") + "/"
             };
-            format!("{}://{}{}{}", base.protocol(), base.host(), base_dir, relative_url)
+            format!(
+                "{}://{}{}{}",
+                base.protocol(),
+                base.host(),
+                base_dir,
+                relative_url
+            )
         };
-        
+
         let resolved = Url::parse(Box::leak(resolved_url.into_boxed_str()), None)?;
         Ok(resolved.href().to_string())
     }
@@ -230,7 +242,7 @@ impl UrlResolver {
     /// Preload dependencies recursively
     pub async fn preload_dependencies(&mut self, url: &str) -> Result<()> {
         let module = self.resolve_url(url).await?;
-        
+
         for dep_url in &module.dependencies {
             // Resolve relative URLs
             let resolved_url = if dep_url.starts_with("http") {
@@ -293,7 +305,10 @@ impl UrlCacheStats {
         println!("URL Cache Statistics:");
         println!("  Memory cache: {} modules", self.memory_entries);
         println!("  Disk cache: {} files", self.disk_files);
-        println!("  Total size: {:.2} MB", self.total_size_bytes as f64 / 1024.0 / 1024.0);
+        println!(
+            "  Total size: {:.2} MB",
+            self.total_size_bytes as f64 / 1024.0 / 1024.0
+        );
     }
 }
 
@@ -315,7 +330,11 @@ impl UrlImportHandler {
     }
 
     /// Resolve URL import and return module content
-    pub async fn resolve_import(&mut self, specifier: &str, referrer: Option<&str>) -> Result<String> {
+    pub async fn resolve_import(
+        &mut self,
+        specifier: &str,
+        referrer: Option<&str>,
+    ) -> Result<String> {
         let resolved_url = if let Some(ref_url) = referrer {
             self.resolver.resolve_relative_url(ref_url, specifier)?
         } else {

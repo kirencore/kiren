@@ -61,7 +61,7 @@ impl ModuleCache {
     /// Mark a module as currently loading (for circular dependency detection)
     pub fn mark_loading(&self, path: PathBuf) -> Result<()> {
         let mut loading_stack = self.loading_stack.lock().unwrap();
-        
+
         // Check for circular dependency
         if loading_stack.contains(&path) {
             let cycle = loading_stack
@@ -70,7 +70,7 @@ impl ModuleCache {
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
                 .join(" -> ");
-            
+
             return Err(anyhow!(
                 "Circular dependency detected: {} -> {}",
                 cycle,
@@ -79,11 +79,11 @@ impl ModuleCache {
         }
 
         loading_stack.push(path.clone());
-        
+
         // Mark as loading in cache
         let mut cache = self.cache.lock().unwrap();
         cache.insert(path, ModuleState::Loading);
-        
+
         Ok(())
     }
 
@@ -133,7 +133,7 @@ impl ModuleCache {
     pub fn clear(&self) {
         let mut cache = self.cache.lock().unwrap();
         cache.clear();
-        
+
         let mut loading_stack = self.loading_stack.lock().unwrap();
         loading_stack.clear();
     }
@@ -142,11 +142,11 @@ impl ModuleCache {
     pub fn stats(&self) -> ModuleCacheStats {
         let cache = self.cache.lock().unwrap();
         let loading_stack = self.loading_stack.lock().unwrap();
-        
+
         let mut loaded_count = 0;
         let mut loading_count = 0;
         let mut error_count = 0;
-        
+
         for state in cache.values() {
             match state {
                 ModuleState::Loading => loading_count += 1,
