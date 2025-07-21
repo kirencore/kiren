@@ -1,8 +1,8 @@
 use anyhow::Result;
-use v8;
-use std::collections::HashMap;
-use serde_json::{json, Value};
 use hyper::{Body, Request, Response, StatusCode};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use v8;
 
 pub fn create_request_object<'a>(
     scope: &mut v8::HandleScope<'a>,
@@ -154,7 +154,7 @@ fn req_get_header(
     // Get the request object (this)
     let this = args.this();
     let headers_key = v8::String::new(scope, "headers").unwrap();
-    
+
     if let Some(headers_obj) = this.get(scope, headers_key.into()) {
         if let Ok(headers_obj) = headers_obj.try_into() {
             let headers_obj: v8::Local<v8::Object> = headers_obj;
@@ -176,11 +176,11 @@ fn res_status(
     mut rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     if args.length() > 0 {
         let status_arg = args.get(0);
         let status_code = status_arg.uint32_value(scope).unwrap_or(200);
-        
+
         let status_key = v8::String::new(scope, "_statusCode").unwrap();
         let status_val = v8::Integer::new(scope, status_code as i32);
         this.set(scope, status_key.into(), status_val.into());
@@ -196,10 +196,10 @@ fn res_json(
     _rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     if args.length() > 0 {
         let data = args.get(0);
-        
+
         // Set Content-Type to application/json
         let headers_key = v8::String::new(scope, "_headers").unwrap();
         if let Some(headers_obj) = this.get(scope, headers_key.into()) {
@@ -216,18 +216,20 @@ fn res_json(
             // Try to stringify object
             let global = scope.get_current_context().global(scope);
             let json_key = v8::String::new(scope, "JSON").unwrap();
-            
+
             if let Some(json_obj) = global.get(scope, json_key.into()) {
                 if let Ok(json_obj) = json_obj.try_into() {
                     let json_obj: v8::Local<v8::Object> = json_obj;
                     let stringify_key = v8::String::new(scope, "stringify").unwrap();
-                    
+
                     if let Some(stringify_fn) = json_obj.get(scope, stringify_key.into()) {
                         if let Ok(stringify_fn) = stringify_fn.try_into() {
                             let stringify_fn: v8::Local<v8::Function> = stringify_fn;
                             let args_array = [data];
-                            
-                            if let Some(result) = stringify_fn.call(scope, json_obj.into(), &args_array) {
+
+                            if let Some(result) =
+                                stringify_fn.call(scope, json_obj.into(), &args_array)
+                            {
                                 result.to_string(scope).unwrap().to_rust_string_lossy(scope)
                             } else {
                                 data.to_string(scope).unwrap().to_rust_string_lossy(scope)
@@ -268,7 +270,7 @@ fn res_send(
     _rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     if args.length() > 0 {
         let data = args.get(0);
         let data_str = data.to_string(scope).unwrap().to_rust_string_lossy(scope);
@@ -284,7 +286,7 @@ fn res_send(
             if let Ok(headers_obj) = headers_obj.try_into() {
                 let headers_obj: v8::Local<v8::Object> = headers_obj;
                 let content_type_key = v8::String::new(scope, "content-type").unwrap();
-                
+
                 if headers_obj.get(scope, content_type_key.into()).is_none() {
                     let content_type_val = v8::String::new(scope, "text/html").unwrap();
                     headers_obj.set(scope, content_type_key.into(), content_type_val.into());
@@ -307,13 +309,20 @@ fn res_set_header(
     mut rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     if args.length() >= 2 {
         let header_name_arg = args.get(0);
         let header_value_arg = args.get(1);
-        
-        let header_name = header_name_arg.to_string(scope).unwrap().to_rust_string_lossy(scope).to_lowercase();
-        let header_value = header_value_arg.to_string(scope).unwrap().to_rust_string_lossy(scope);
+
+        let header_name = header_name_arg
+            .to_string(scope)
+            .unwrap()
+            .to_rust_string_lossy(scope)
+            .to_lowercase();
+        let header_value = header_value_arg
+            .to_string(scope)
+            .unwrap()
+            .to_rust_string_lossy(scope);
 
         let headers_key = v8::String::new(scope, "_headers").unwrap();
         if let Some(headers_obj) = this.get(scope, headers_key.into()) {
@@ -330,13 +339,9 @@ fn res_set_header(
     rv.set(this.into());
 }
 
-fn res_end(
-    scope: &mut v8::HandleScope,
-    args: v8::FunctionCallbackArguments,
-    _rv: v8::ReturnValue,
-) {
+fn res_end(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
     let this = args.this();
-    
+
     if args.length() > 0 {
         let data = args.get(0);
         let data_str = data.to_string(scope).unwrap().to_rust_string_lossy(scope);
@@ -388,7 +393,10 @@ fn json_to_v8<'a>(scope: &mut v8::HandleScope<'a>, value: &Value) -> v8::Local<'
 }
 
 // Helper to extract response data
-pub fn extract_response_data(scope: &mut v8::HandleScope, res_obj: v8::Local<v8::Object>) -> (u16, HashMap<String, String>, String) {
+pub fn extract_response_data(
+    scope: &mut v8::HandleScope,
+    res_obj: v8::Local<v8::Object>,
+) -> (u16, HashMap<String, String>, String) {
     let mut status_code = 200u16;
     let mut headers = HashMap::new();
     let mut body = String::new();
@@ -413,7 +421,10 @@ pub fn extract_response_data(scope: &mut v8::HandleScope, res_obj: v8::Local<v8:
     // Get body
     let body_key = v8::String::new(scope, "_body").unwrap();
     if let Some(body_val) = res_obj.get(scope, body_key.into()) {
-        body = body_val.to_string(scope).unwrap().to_rust_string_lossy(scope);
+        body = body_val
+            .to_string(scope)
+            .unwrap()
+            .to_rust_string_lossy(scope);
     }
 
     (status_code, headers, body)

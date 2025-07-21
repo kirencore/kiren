@@ -1,12 +1,12 @@
 use anyhow::Result;
-use v8;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy;
-use serde_json::json;
-use regex::Regex;
 use hyper::{Body, Request, Response, Server, StatusCode};
+use once_cell::sync::Lazy;
+use regex::Regex;
+use serde_json::json;
+use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
+use v8;
 
 #[derive(Debug, Clone)]
 pub struct Route {
@@ -51,8 +51,10 @@ impl Default for ResponseContext {
     }
 }
 
-pub static EXPRESS_ROUTES: Lazy<Arc<Mutex<Vec<Route>>>> = Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-pub static EXPRESS_MIDDLEWARE: Lazy<Arc<Mutex<Vec<Middleware>>>> = Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+pub static EXPRESS_ROUTES: Lazy<Arc<Mutex<Vec<Route>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+pub static EXPRESS_MIDDLEWARE: Lazy<Arc<Mutex<Vec<Middleware>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
 pub fn setup_express(_scope: &mut v8::HandleScope, _context: v8::Local<v8::Context>) -> Result<()> {
     // Express is now handled through the require() system in npm_simple.rs
@@ -210,9 +212,9 @@ fn static_middleware_handler(
         if let Some(url_val) = req_obj.get(scope, url_key.into()) {
             let url_str = url_val.to_string(scope).unwrap();
             let url = url_str.to_rust_string_lossy(scope);
-            
+
             println!("Static middleware handling: {}", url);
-            
+
             // For now, just call next() to continue to next middleware
             if let Ok(next_fn) = v8::Local::<v8::Function>::try_from(next) {
                 let undefined = v8::undefined(scope);
@@ -222,11 +224,7 @@ fn static_middleware_handler(
     }
 }
 
-fn app_get(
-    scope: &mut v8::HandleScope,
-    args: v8::FunctionCallbackArguments,
-    _rv: v8::ReturnValue,
-) {
+fn app_get(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
     register_route(scope, args, "GET");
 }
 
@@ -238,11 +236,7 @@ fn app_post(
     register_route(scope, args, "POST");
 }
 
-fn app_put(
-    scope: &mut v8::HandleScope,
-    args: v8::FunctionCallbackArguments,
-    _rv: v8::ReturnValue,
-) {
+fn app_put(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
     register_route(scope, args, "PUT");
 }
 
@@ -286,15 +280,11 @@ fn router_delete(
     register_route(scope, args, "DELETE");
 }
 
-fn app_use(
-    scope: &mut v8::HandleScope,
-    args: v8::FunctionCallbackArguments,
-    _rv: v8::ReturnValue,
-) {
+fn app_use(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue) {
     if args.length() == 0 {
         return;
     }
-    
+
     let (path_pattern, middleware_index) = if args.length() == 1 {
         // app.use(middleware) - global middleware
         ("*".to_string(), 0)
@@ -304,12 +294,12 @@ fn app_use(
         let path_str = path_arg.to_string(scope).unwrap();
         (path_str.to_rust_string_lossy(scope), 1)
     };
-    
+
     // Handle multiple middleware functions
     let mut start_index = middleware_index;
     while start_index < args.length() {
         let middleware_arg = args.get(start_index);
-        
+
         if middleware_arg.is_function() {
             // Convert function to string representation
             let callback_code = format!(
@@ -320,20 +310,20 @@ fn app_use(
                 }}",
                 start_index
             );
-            
+
             // Check if this is an error handler (4 parameters)
             let is_error_handler = false; // TODO: detect function arity
-            
+
             let middleware = Middleware {
                 path_pattern: path_pattern.clone(),
                 callback_code,
                 is_error_handler,
             };
-            
+
             EXPRESS_MIDDLEWARE.lock().unwrap().push(middleware);
             println!("Middleware registered for path: {}", path_pattern);
         }
-        
+
         start_index += 1;
     }
 }
@@ -350,7 +340,7 @@ fn app_listen(
     };
 
     println!("Express app listening on port {}", port);
-    
+
     // Start HTTP server in background
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -362,11 +352,7 @@ fn app_listen(
     });
 }
 
-fn register_route(
-    scope: &mut v8::HandleScope,
-    args: v8::FunctionCallbackArguments,
-    method: &str,
-) {
+fn register_route(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, method: &str) {
     if args.length() < 2 {
         return;
     }
@@ -376,11 +362,14 @@ fn register_route(
     let path = path_str.to_rust_string_lossy(scope);
 
     let callback_arg = args.get(1);
-    
+
     // Convert function to string for later execution
     let callback_code = if callback_arg.is_function() {
         // For now, we'll create a simple wrapper
-        format!("function(req, res) {{ res.json({{ message: 'Route {} {}' }}); }}", method, path)
+        format!(
+            "function(req, res) {{ res.json({{ message: 'Route {} {}' }}); }}",
+            method, path
+        )
     } else {
         // String response
         let callback_str = callback_arg.to_string(scope).unwrap();
@@ -409,11 +398,11 @@ fn parse_route_pattern(path: &str) -> (String, Vec<String>) {
 
     // Find URL parameters like :id, :userId etc.
     let param_regex = Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-    
+
     for cap in param_regex.captures_iter(path) {
         let param_name = cap[1].to_string();
         param_names.push(param_name);
-        
+
         // Replace :param with regex pattern
         pattern = pattern.replace(&cap[0], "([^/]+)");
     }
@@ -427,7 +416,7 @@ fn parse_route_pattern(path: &str) -> (String, Vec<String>) {
 
 pub fn match_route(method: &str, path: &str) -> Option<(Route, HashMap<String, String>)> {
     let routes = EXPRESS_ROUTES.lock().unwrap();
-    
+
     for route in routes.iter() {
         if route.method != method {
             continue;
@@ -440,7 +429,7 @@ pub fn match_route(method: &str, path: &str) -> Option<(Route, HashMap<String, S
 
         if let Some(captures) = regex.captures(path) {
             let mut params = HashMap::new();
-            
+
             // Extract URL parameters
             for (i, param_name) in route.param_names.iter().enumerate() {
                 if let Some(capture) = captures.get(i + 1) {
@@ -460,19 +449,18 @@ pub async fn start_express_server(port: u16) -> Result<()> {
     use std::net::SocketAddr;
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    
-    let make_svc = make_service_fn(|_conn| async {
-        Ok::<_, Infallible>(service_fn(handle_express_request))
-    });
+
+    let make_svc =
+        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_express_request)) });
 
     let server = Server::bind(&addr).serve(make_svc);
     println!("Express server running on http://127.0.0.1:{}", port);
-    
+
     if let Err(e) = server.await {
         eprintln!("Express server error: {}", e);
         return Err(e.into());
     }
-    
+
     Ok(())
 }
 
@@ -481,19 +469,28 @@ async fn handle_express_request(req: Request<Body>) -> Result<Response<Body>, In
     let path = req.uri().path().to_string();
     let query = parse_query_string(req.uri().query().unwrap_or(""));
     let headers = extract_headers(&req);
-    
+
     // Get body (simplified for now)
-    let body_bytes = hyper::body::to_bytes(req.into_body()).await.unwrap_or_default();
+    let body_bytes = hyper::body::to_bytes(req.into_body())
+        .await
+        .unwrap_or_default();
     let body = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
-    
+
     // Try to match route
     if let Some((route, params)) = match_route(&method, &path) {
         // Execute route with proper req/res objects
-        let response_data = execute_route_callback(&route, &method, &path, query, params, headers, &body).await;
-        
+        let response_data =
+            execute_route_callback(&route, &method, &path, query, params, headers, &body).await;
+
         return Ok(Response::builder()
             .status(response_data.0)
-            .header("content-type", response_data.1.get("content-type").unwrap_or(&"application/json".to_string()))
+            .header(
+                "content-type",
+                response_data
+                    .1
+                    .get("content-type")
+                    .unwrap_or(&"application/json".to_string()),
+            )
             .header("access-control-allow-origin", "*")
             .body(Body::from(response_data.2))
             .unwrap());
@@ -517,7 +514,7 @@ fn parse_query_string(query: &str) -> HashMap<String, String> {
     if query.is_empty() {
         return map;
     }
-    
+
     for pair in query.split('&') {
         if let Some((key, value)) = pair.split_once('=') {
             map.insert(
@@ -550,9 +547,9 @@ async fn execute_route_callback(
 ) -> (u16, HashMap<String, String>, String) {
     // Create a simple V8 context for executing the callback
     use crate::runtime::engine::Engine;
-    
+
     let mut engine = Engine::new().unwrap();
-    
+
     // Create callback execution code
     let callback_code = format!(
         r#"
@@ -622,19 +619,21 @@ async fn execute_route_callback(
         serde_json::to_string(&params).unwrap_or_else(|_| "{{}}".to_string()),
         serde_json::to_string(&query).unwrap_or_else(|_| "{{}}".to_string()),
         serde_json::to_string(&headers).unwrap_or_else(|_| "{{}}".to_string()),
-        if body.is_empty() { "{{}}".to_string() } else { 
+        if body.is_empty() {
+            "{{}}".to_string()
+        } else {
             serde_json::to_string(body).unwrap_or_else(|_| "{{}}".to_string())
         },
         route.callback_code
     );
-    
+
     // Execute and parse result
     match engine.execute(&callback_code) {
         Ok(result) => {
             if let Ok(response_data) = serde_json::from_str::<serde_json::Value>(&result) {
                 let status = response_data["statusCode"].as_u64().unwrap_or(200) as u16;
                 let mut headers = HashMap::new();
-                
+
                 if let Some(header_obj) = response_data["headers"].as_object() {
                     for (key, value) in header_obj {
                         if let Some(value_str) = value.as_str() {
@@ -642,22 +641,23 @@ async fn execute_route_callback(
                         }
                     }
                 }
-                
+
                 let body = response_data["body"].as_str().unwrap_or("").to_string();
                 return (status, headers, body);
             }
         }
         Err(_) => {}
     }
-    
+
     // Fallback response
     let mut headers = HashMap::new();
     headers.insert("content-type".to_string(), "application/json".to_string());
     let fallback_body = json!({
         "message": format!("Route {} {} executed", method, path),
         "params": params
-    }).to_string();
-    
+    })
+    .to_string();
+
     (200, headers, fallback_body)
 }
 

@@ -1,21 +1,21 @@
 use anyhow::Result;
 use clap::{Arg, Command};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
-use std::time::Duration;
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc;
+use std::time::Duration;
 
 mod api;
 mod config;
 mod modules;
-mod runtime;
 mod package;
+mod runtime;
 mod typescript;
-use runtime::engine::Engine;
-use config::KirenConfig;
 use api::console;
+use config::KirenConfig;
+use runtime::engine::Engine;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -121,14 +121,12 @@ async fn main() -> Result<()> {
                 ),
         )
         .subcommand(
-            Command::new("search")
-                .about("Search for packages")
-                .arg(
-                    Arg::new("query")
-                        .help("Search query")
-                        .required(true)
-                        .index(1),
-                ),
+            Command::new("search").about("Search for packages").arg(
+                Arg::new("query")
+                    .help("Search query")
+                    .required(true)
+                    .index(1),
+            ),
         )
         .subcommand(
             Command::new("cache")
@@ -137,14 +135,12 @@ async fn main() -> Result<()> {
                 .subcommand(Command::new("stats").about("Show cache statistics")),
         )
         .subcommand(
-            Command::new("test")
-                .about("Run test files")
-                .arg(
-                    Arg::new("pattern")
-                        .help("Test file pattern (e.g., test-*.js)")
-                        .required(false)
-                        .index(1),
-                ),
+            Command::new("test").about("Run test files").arg(
+                Arg::new("pattern")
+                    .help("Test file pattern (e.g., test-*.js)")
+                    .required(false)
+                    .index(1),
+            ),
         )
         .get_matches();
 
@@ -165,7 +161,9 @@ async fn main() -> Result<()> {
     }
 
     if let Some(env) = matches.get_one::<String>("env") {
-        config.environment.insert("NODE_ENV".to_string(), env.clone());
+        config
+            .environment
+            .insert("NODE_ENV".to_string(), env.clone());
     }
 
     if let Some(port) = matches.get_one::<String>("port") {
@@ -177,7 +175,7 @@ async fn main() -> Result<()> {
     // Set logging level
     let verbose = matches.get_flag("verbose");
     let silent = matches.get_flag("silent");
-    
+
     // Configure console logging
     console::configure_console(verbose, silent);
 
@@ -225,10 +223,10 @@ async fn execute_file(filename: &str) -> Result<()> {
     let mut engine = Engine::new()?;
 
     // Check file extension to determine execution mode
-    let is_module = filename.ends_with(".mjs") || 
-                   filename.ends_with(".esm.js") ||
-                   source.contains("import ") ||
-                   source.contains("export ");
+    let is_module = filename.ends_with(".mjs")
+        || filename.ends_with(".esm.js")
+        || source.contains("import ")
+        || source.contains("export ");
 
     let result = if is_module {
         println!("Executing ES module: {}", filename);
@@ -245,7 +243,7 @@ async fn execute_file(filename: &str) -> Result<()> {
                 let port = extract_port_from_source(&source);
                 println!("Starting HTTP server on port {}", port);
                 println!("Press Ctrl+C to stop the server.");
-                
+
                 // Give server thread time to start
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -292,7 +290,7 @@ fn extract_port_from_source(source: &str) -> u16 {
             }
         }
     }
-    
+
     // Look for .listen(port) patterns
     if let Some(listen_pos) = source.find(".listen(") {
         let after_listen = &source[listen_pos + 8..];
@@ -303,7 +301,7 @@ fn extract_port_from_source(source: &str) -> u16 {
             }
         }
     }
-    
+
     // Default port
     3000
 }
@@ -400,16 +398,16 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
     let source = fs::read_to_string(filename)?;
 
     // Check file extension to determine execution mode
-    let is_module = filename.ends_with(".mjs") || 
-                   filename.ends_with(".esm.js") ||
-                   source.contains("import ") ||
-                   source.contains("export ");
+    let is_module = filename.ends_with(".mjs")
+        || filename.ends_with(".esm.js")
+        || source.contains("import ")
+        || source.contains("export ");
 
     // Check if script contains timers and use event loop if needed
-    let contains_timers = source.contains("setTimeout") || 
-                         source.contains("setInterval") ||
-                         source.contains("createServer") ||
-                         source.contains("listen");
+    let contains_timers = source.contains("setTimeout")
+        || source.contains("setInterval")
+        || source.contains("createServer")
+        || source.contains("listen");
 
     let result = if contains_timers {
         // Use event loop for scripts with timers
@@ -437,10 +435,10 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
                 // Wait for timer tasks to complete and process their callbacks
                 let start_time = std::time::Instant::now();
                 let timeout = tokio::time::Duration::from_secs(10); // 10 second timeout
-                
+
                 while start_time.elapsed() < timeout {
                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                    
+
                     if let Err(_) = engine.execute_with_callbacks("", true) {
                         // Timer callback processing failed - continue silently
                     }
@@ -455,12 +453,12 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
                     }
                 }
             }
-            
+
             // Check if this is an HTTP server script
             if source.contains("http.createServer") || source.contains("server.listen") {
                 let port = extract_port_from_source(&source);
                 println!("Starting HTTP server on port {}", port);
-                
+
                 // Minimal startup delay for server binding
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             } else {
@@ -484,15 +482,13 @@ async fn run_watch_mode(filename: &str) -> Result<()> {
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
-        move |res: notify::Result<Event>| {
-            match res {
-                Ok(event) => {
-                    if let Err(e) = tx.send(event) {
-                        eprintln!("Watch error: {}", e);
-                    }
+        move |res: notify::Result<Event>| match res {
+            Ok(event) => {
+                if let Err(e) = tx.send(event) {
+                    eprintln!("Watch error: {}", e);
                 }
-                Err(e) => eprintln!("Watch error: {}", e),
             }
+            Err(e) => eprintln!("Watch error: {}", e),
         },
         Config::default(),
     )?;
@@ -512,15 +508,18 @@ async fn run_watch_mode(filename: &str) -> Result<()> {
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
                 // Only process specific modify events (data changes, not metadata)
-                if matches!(event.kind, notify::EventKind::Modify(notify::event::ModifyKind::Data(_))) {
+                if matches!(
+                    event.kind,
+                    notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                ) {
                     println!("\nFile changed, restarting...");
-                    
+
                     // Shutdown any existing HTTP servers first
                     api::http::shutdown_http_servers();
-                    
+
                     // Minimal delay for file consistency
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    
+
                     println!("Reloading: {}", filename);
                     match execute_file_with_engine(filename, &mut engine).await {
                         Ok(_) => println!("Reload completed"),
@@ -546,101 +545,97 @@ async fn run_watch_mode(filename: &str) -> Result<()> {
 // Package Manager Command Handlers
 
 async fn handle_init_command(matches: &clap::ArgMatches) -> Result<()> {
-    let project_name = matches.get_one::<String>("name")
+    let project_name = matches
+        .get_one::<String>("name")
         .map(|s| s.as_str())
-        .unwrap_or_else(|| {
-            "kiren-app"
-        });
+        .unwrap_or_else(|| "kiren-app");
 
     let current_dir = std::env::current_dir()?;
-    
-    
+
     package::KirenPackageManager::init(&current_dir, project_name).await?;
-    
-    
+
     Ok(())
 }
 
 async fn handle_install_command() -> Result<()> {
     let current_dir = std::env::current_dir()?;
-    
-    
+
     let package_manager = package::KirenPackageManager::new()?;
     let _packages = package_manager.install(&current_dir).await?;
-    
-    
+
     Ok(())
 }
 
 async fn handle_add_command(matches: &clap::ArgMatches) -> Result<()> {
     let package_spec = matches.get_one::<String>("package").unwrap();
     let is_dev = matches.get_flag("dev");
-    
-    
+
     let package_manager = package::KirenPackageManager::new()?;
     let resolved_package = package_manager.resolve(package_spec).await?;
-    
+
     // Update kiren.toml
     let current_dir = std::env::current_dir()?;
     let config_path = current_dir.join("kiren.toml");
-    
+
     if config_path.exists() {
         let content = tokio::fs::read_to_string(&config_path).await?;
         let mut config: package::ProjectConfig = toml::from_str(&content)?;
-        
+
         if is_dev {
-            config.add_dev_dependency(&resolved_package.package.name, &resolved_package.package.version);
+            config.add_dev_dependency(
+                &resolved_package.package.name,
+                &resolved_package.package.version,
+            );
         } else {
-            config.add_dependency(&resolved_package.package.name, &resolved_package.package.version);
+            config.add_dependency(
+                &resolved_package.package.name,
+                &resolved_package.package.version,
+            );
         }
-        
+
         let updated_content = config.to_toml()?;
         tokio::fs::write(&config_path, updated_content).await?;
-        
     } else {
         return Err(anyhow::anyhow!("No kiren.toml found"));
     }
-    
+
     Ok(())
 }
 
 async fn handle_remove_command(matches: &clap::ArgMatches) -> Result<()> {
     let package_name = matches.get_one::<String>("package").unwrap();
-    
-    
+
     // Update kiren.toml
     let current_dir = std::env::current_dir()?;
     let config_path = current_dir.join("kiren.toml");
-    
+
     if config_path.exists() {
         let content = tokio::fs::read_to_string(&config_path).await?;
         let mut config: package::ProjectConfig = toml::from_str(&content)?;
-        
+
         let removed_from_deps = config.dependencies.remove(package_name).is_some();
         let removed_from_dev = config.dev_dependencies.remove(package_name).is_some();
-        
+
         if removed_from_deps || removed_from_dev {
             let updated_content = config.to_toml()?;
             tokio::fs::write(&config_path, updated_content).await?;
-            
         } else {
         }
     } else {
         return Err(anyhow::anyhow!("No kiren.toml found"));
     }
-    
+
     Ok(())
 }
 
 async fn handle_search_command(matches: &clap::ArgMatches) -> Result<()> {
     let query = matches.get_one::<String>("query").unwrap();
-    
-    
+
     let _package_manager = package::KirenPackageManager::new()?;
     let registry = package::KirenRegistry::new("https://registry.kiren.dev".to_string());
-    
+
     let results = registry.search(query).await?;
-    
+
     if results.is_empty() {
         println!("No packages found matching '{}'", query);
     } else {
@@ -651,7 +646,7 @@ async fn handle_search_command(matches: &clap::ArgMatches) -> Result<()> {
         println!();
         println!("Add a package: kiren add <package>@<version>");
     }
-    
+
     Ok(())
 }
 
@@ -661,9 +656,9 @@ async fn handle_cache_command(matches: &clap::ArgMatches) -> Result<()> {
         dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
             .join(".kiren")
-            .join("cache")
+            .join("cache"),
     )?;
-    
+
     match matches.subcommand() {
         Some(("clean", _)) => {
             cache.clean(30).await?; // Clean packages older than 30 days
@@ -678,25 +673,26 @@ async fn handle_cache_command(matches: &clap::ArgMatches) -> Result<()> {
             println!("  kiren cache stats  - Show cache statistics");
         }
     }
-    
+
     Ok(())
 }
 
 async fn handle_test_command(matches: &clap::ArgMatches) -> Result<()> {
-    let pattern = matches.get_one::<String>("pattern")
+    let pattern = matches
+        .get_one::<String>("pattern")
         .map(|s| s.as_str())
         .unwrap_or("test-*.js");
-    
+
     let current_dir = std::env::current_dir()?;
     let test_dir = current_dir.join("tests");
-    
+
     if !test_dir.exists() {
         println!("No tests directory found. Creating tests/...");
         std::fs::create_dir_all(&test_dir)?;
         println!("Place your test files in the tests/ directory.");
         return Ok(());
     }
-    
+
     // Find test files
     let mut test_files = Vec::new();
     for entry in std::fs::read_dir(&test_dir)? {
@@ -705,40 +701,50 @@ async fn handle_test_command(matches: &clap::ArgMatches) -> Result<()> {
         if path.is_file() {
             if let Some(file_name) = path.file_name() {
                 let name = file_name.to_string_lossy();
-                if name.ends_with(".js") && (pattern == "test-*.js" && name.starts_with("test-") || name.contains(pattern)) {
+                if name.ends_with(".js")
+                    && (pattern == "test-*.js" && name.starts_with("test-")
+                        || name.contains(pattern))
+                {
                     test_files.push(path);
                 }
             }
         }
     }
-    
+
     if test_files.is_empty() {
         println!("No test files found matching pattern: {}", pattern);
         return Ok(());
     }
-    
+
     println!("Running {} test file(s)...\n", test_files.len());
-    
+
     // Execute each test file
     for test_file in test_files {
         println!("Running: {}", test_file.display());
-        
+
         let mut engine = Engine::new()?;
         let source = std::fs::read_to_string(&test_file)?;
-        
+
         match engine.execute(&source) {
             Ok(_) => {
-                println!("✅ {} completed", test_file.file_name().unwrap().to_string_lossy());
+                println!(
+                    "✅ {} completed",
+                    test_file.file_name().unwrap().to_string_lossy()
+                );
             }
             Err(e) => {
-                println!("❌ {} failed: {}", test_file.file_name().unwrap().to_string_lossy(), e);
+                println!(
+                    "❌ {} failed: {}",
+                    test_file.file_name().unwrap().to_string_lossy(),
+                    e
+                );
             }
         }
         println!();
     }
-    
+
     // Print test summary
     crate::api::test::print_test_summary();
-    
+
     Ok(())
 }

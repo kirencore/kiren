@@ -1,8 +1,8 @@
 use anyhow::Result;
-use sha2::{Sha256, Sha512, Digest};
-use md5;
 use base64::prelude::*;
+use md5;
 use rand::Rng;
+use sha2::{Digest, Sha256, Sha512};
 use v8;
 
 /// Crypto module implementation for Node.js compatibility
@@ -105,7 +105,7 @@ fn hash_update(
     mut rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     if args.length() == 0 {
         rv.set(this.into());
         return;
@@ -175,7 +175,8 @@ fn hash_digest(
             format!("{:x}", hasher.finalize())
         }
         _ => {
-            let error = v8::String::new(scope, &format!("Unsupported algorithm: {}", algo_name)).unwrap();
+            let error =
+                v8::String::new(scope, &format!("Unsupported algorithm: {}", algo_name)).unwrap();
             let exception = v8::Exception::error(scope, error);
             scope.throw_exception(exception);
             return;
@@ -225,7 +226,7 @@ fn crypto_random_bytes(
 
     // Create Buffer-like object
     let buffer_obj = v8::Object::new(scope);
-    
+
     // Set length
     let length_key = v8::String::new(scope, "length").unwrap();
     let length_value = v8::Number::new(scope, size_num as f64);
@@ -252,7 +253,7 @@ fn random_bytes_to_string(
     mut rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     let encoding = if args.length() > 0 {
         let enc = args.get(0);
         let enc_str = enc.to_string(scope).unwrap();
@@ -305,7 +306,8 @@ fn crypto_create_hmac(
     mut rv: v8::ReturnValue,
 ) {
     if args.length() < 2 {
-        let error = v8::String::new(scope, "createHmac requires algorithm and key parameters").unwrap();
+        let error =
+            v8::String::new(scope, "createHmac requires algorithm and key parameters").unwrap();
         let exception = v8::Exception::type_error(scope, error);
         scope.throw_exception(exception);
         return;
@@ -316,7 +318,7 @@ fn crypto_create_hmac(
 
     let algorithm_str = algorithm.to_string(scope).unwrap();
     let algorithm_name = algorithm_str.to_rust_string_lossy(scope);
-    
+
     let key_str = key.to_string(scope).unwrap();
     let key_content = key_str.to_rust_string_lossy(scope);
 
@@ -404,7 +406,11 @@ fn crypto_pbkdf2(
 ) {
     // Async PBKDF2 - simplified implementation
     if args.length() < 5 {
-        let error = v8::String::new(scope, "pbkdf2 requires password, salt, iterations, keylen, and callback").unwrap();
+        let error = v8::String::new(
+            scope,
+            "pbkdf2 requires password, salt, iterations, keylen, and callback",
+        )
+        .unwrap();
         let exception = v8::Exception::type_error(scope, error);
         scope.throw_exception(exception);
         return;
@@ -415,11 +421,11 @@ fn crypto_pbkdf2(
     if callback.is_function() {
         let callback_fn = unsafe { v8::Local::<v8::Function>::cast(callback) };
         let undefined = v8::undefined(scope);
-        
+
         // Simple derived key (in real implementation, use proper PBKDF2)
         let derived_key = v8::String::new(scope, "derived_key_placeholder").unwrap();
         let result_args = [v8::null(scope).into(), derived_key.into()];
-        
+
         callback_fn.call(scope, undefined.into(), &result_args);
     }
 }
@@ -431,7 +437,11 @@ fn crypto_pbkdf2_sync(
 ) {
     // Sync PBKDF2 - simplified implementation
     if args.length() < 4 {
-        let error = v8::String::new(scope, "pbkdf2Sync requires password, salt, iterations, and keylen").unwrap();
+        let error = v8::String::new(
+            scope,
+            "pbkdf2Sync requires password, salt, iterations, and keylen",
+        )
+        .unwrap();
         let exception = v8::Exception::type_error(scope, error);
         scope.throw_exception(exception);
         return;

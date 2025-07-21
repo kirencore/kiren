@@ -1,9 +1,12 @@
 use anyhow::Result;
-use v8;
-use std::path::Path;
 use std::fs;
+use std::path::Path;
+use v8;
 
-pub fn setup_npm_compatibility(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
+pub fn setup_npm_compatibility(
+    scope: &mut v8::HandleScope,
+    context: v8::Local<v8::Context>,
+) -> Result<()> {
     let global = context.global(scope);
 
     // Simple require() function for basic CommonJS compatibility
@@ -25,11 +28,11 @@ pub fn setup_npm_compatibility(scope: &mut v8::HandleScope, context: v8::Local<v
     // module.exports object for CommonJS
     let module_key = v8::String::new(scope, "module").unwrap();
     let module_obj = v8::Object::new(scope);
-    
+
     let exports_key = v8::String::new(scope, "exports").unwrap();
     let exports_obj = v8::Object::new(scope);
     module_obj.set(scope, exports_key.into(), exports_obj.into());
-    
+
     global.set(scope, module_key.into(), module_obj.into());
 
     // exports shorthand
@@ -56,7 +59,7 @@ fn simple_require(
     let module_path = module_path_str.to_rust_string_lossy(scope);
 
     println!("Requiring module: {}", module_path);
-    
+
     // Try to load file-based modules first (like Node.js)
     match load_module_with_resolution(scope, &module_path) {
         Ok(module_exports) => {
@@ -82,12 +85,18 @@ fn simple_require(
     scope.throw_exception(error);
 }
 
-fn load_module_with_resolution<'a>(scope: &mut v8::HandleScope<'a>, module_path: &str) -> Result<v8::Local<'a, v8::Value>> {
+fn load_module_with_resolution<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    module_path: &str,
+) -> Result<v8::Local<'a, v8::Value>> {
     let current_dir = std::env::current_dir()?;
     println!("Current directory: {}", current_dir.display());
-    
+
     // Node.js style module resolution
-    if !module_path.starts_with("./") && !module_path.starts_with("../") && !module_path.starts_with("/") {
+    if !module_path.starts_with("./")
+        && !module_path.starts_with("../")
+        && !module_path.starts_with("/")
+    {
         println!("Trying node_modules resolution for: {}", module_path);
         // Try node_modules
         if let Ok(result) = try_node_modules_resolution(scope, &current_dir, module_path) {
@@ -96,24 +105,24 @@ fn load_module_with_resolution<'a>(scope: &mut v8::HandleScope<'a>, module_path:
         }
         println!("✗ Not found in node_modules");
     }
-    
+
     println!("Trying relative/absolute path resolution");
     // Relative/absolute path resolution
     load_simple_module(scope, module_path)
 }
 
 fn try_node_modules_resolution<'a>(
-    scope: &mut v8::HandleScope<'a>, 
-    current_dir: &std::path::Path, 
-    module_name: &str
+    scope: &mut v8::HandleScope<'a>,
+    current_dir: &std::path::Path,
+    module_name: &str,
 ) -> Result<v8::Local<'a, v8::Value>> {
     let node_modules_path = current_dir.join("node_modules").join(module_name);
     println!("Looking for module at: {}", node_modules_path.display());
-    
+
     // Try package.json main field
     let package_json_path = node_modules_path.join("package.json");
     println!("Checking package.json at: {}", package_json_path.display());
-    
+
     if package_json_path.exists() {
         println!("✓ package.json exists");
         if let Ok(package_content) = fs::read_to_string(&package_json_path) {
@@ -144,7 +153,7 @@ fn try_node_modules_resolution<'a>(
     } else {
         println!("✗ package.json does not exist");
     }
-    
+
     // Try index.js
     let index_path = node_modules_path.join("index.js");
     println!("Trying index.js at: {}", index_path.display());
@@ -152,17 +161,20 @@ fn try_node_modules_resolution<'a>(
         let content = fs::read_to_string(&index_path)?;
         return execute_module_content(scope, &content);
     }
-    
+
     // Try direct file
     if node_modules_path.exists() && node_modules_path.is_file() {
         let content = fs::read_to_string(&node_modules_path)?;
         return execute_module_content(scope, &content);
     }
-    
+
     Err(anyhow::anyhow!("Module not found: {}", module_name))
 }
 
-fn get_builtin_module<'a>(scope: &mut v8::HandleScope<'a>, module_name: &str) -> Option<v8::Local<'a, v8::Value>> {
+fn get_builtin_module<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    module_name: &str,
+) -> Option<v8::Local<'a, v8::Value>> {
     match module_name {
         "fs" => Some(create_simple_fs_module(scope)),
         "path" => Some(create_simple_path_module(scope)),
@@ -174,19 +186,19 @@ fn get_builtin_module<'a>(scope: &mut v8::HandleScope<'a>, module_name: &str) ->
 
 fn create_simple_fs_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
     let fs_obj = v8::Object::new(scope);
-    
+
     // readFileSync
     let read_file_sync_key = v8::String::new(scope, "readFileSync").unwrap();
     let read_file_sync_template = v8::FunctionTemplate::new(scope, simple_read_file_sync);
     let read_file_sync_fn = read_file_sync_template.get_function(scope).unwrap();
     fs_obj.set(scope, read_file_sync_key.into(), read_file_sync_fn.into());
-    
+
     // writeFileSync
     let write_file_sync_key = v8::String::new(scope, "writeFileSync").unwrap();
     let write_file_sync_template = v8::FunctionTemplate::new(scope, simple_write_file_sync);
     let write_file_sync_fn = write_file_sync_template.get_function(scope).unwrap();
     fs_obj.set(scope, write_file_sync_key.into(), write_file_sync_fn.into());
-    
+
     // existsSync
     let exists_sync_key = v8::String::new(scope, "existsSync").unwrap();
     let exists_sync_template = v8::FunctionTemplate::new(scope, simple_exists_sync);
@@ -198,7 +210,7 @@ fn create_simple_fs_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a,
 
 fn create_simple_path_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
     let path_obj = v8::Object::new(scope);
-    
+
     // join
     let join_key = v8::String::new(scope, "join").unwrap();
     let join_template = v8::FunctionTemplate::new(scope, simple_path_join);
@@ -210,7 +222,7 @@ fn create_simple_path_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'
 
 fn create_simple_os_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
     let os_obj = v8::Object::new(scope);
-    
+
     // platform
     let platform_key = v8::String::new(scope, "platform").unwrap();
     let platform_template = v8::FunctionTemplate::new(scope, simple_os_platform);
@@ -222,7 +234,7 @@ fn create_simple_os_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a,
 
 fn create_simple_http_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
     let http_obj = v8::Object::new(scope);
-    
+
     // createServer
     let create_server_key = v8::String::new(scope, "createServer").unwrap();
     let create_server_template = v8::FunctionTemplate::new(scope, simple_create_server);
@@ -232,7 +244,10 @@ fn create_simple_http_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'
     http_obj.into()
 }
 
-fn load_simple_module<'a>(scope: &mut v8::HandleScope<'a>, module_path: &str) -> Result<v8::Local<'a, v8::Value>> {
+fn load_simple_module<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    module_path: &str,
+) -> Result<v8::Local<'a, v8::Value>> {
     let current_dir = std::env::current_dir()?;
     let full_path = if module_path.starts_with("./") || module_path.starts_with("../") {
         current_dir.join(module_path)
@@ -260,32 +275,42 @@ fn load_simple_module<'a>(scope: &mut v8::HandleScope<'a>, module_path: &str) ->
     Err(anyhow::anyhow!("Module not found: {}", module_path))
 }
 
-fn execute_module_content<'a>(scope: &mut v8::HandleScope<'a>, content: &str) -> Result<v8::Local<'a, v8::Value>> {
+fn execute_module_content<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    content: &str,
+) -> Result<v8::Local<'a, v8::Value>> {
     // Create a simple module execution context
     let _exports_obj = v8::Object::new(scope);
-    
+
     // Wrap the module code in a simple IIFE
     let wrapped_code = format!(
         "(function() {{\n  var exports = {{}}, module = {{ exports: exports }};\n  {}\n  return module.exports;\n}})()",
         content
     );
-    
+
     let source_string = v8::String::new(scope, &wrapped_code).unwrap();
     let script = v8::Script::compile(scope, source_string, None)
         .ok_or_else(|| anyhow::anyhow!("Failed to compile module"))?;
-    
-    let result = script.run(scope)
+
+    let result = script
+        .run(scope)
         .ok_or_else(|| anyhow::anyhow!("Failed to run module"))?;
-    
+
     Ok(result)
 }
 
-fn parse_json_module<'a>(scope: &mut v8::HandleScope<'a>, content: &str) -> Result<v8::Local<'a, v8::Value>> {
+fn parse_json_module<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    content: &str,
+) -> Result<v8::Local<'a, v8::Value>> {
     let json_value: serde_json::Value = serde_json::from_str(content)?;
     Ok(json_to_v8_simple(scope, &json_value))
 }
 
-fn json_to_v8_simple<'a>(scope: &mut v8::HandleScope<'a>, value: &serde_json::Value) -> v8::Local<'a, v8::Value> {
+fn json_to_v8_simple<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    value: &serde_json::Value,
+) -> v8::Local<'a, v8::Value> {
     match value {
         serde_json::Value::Null => v8::null(scope).into(),
         serde_json::Value::Bool(b) => v8::Boolean::new(scope, *b).into(),
@@ -331,11 +356,11 @@ fn simple_read_file_sync(
         scope.throw_exception(error);
         return;
     }
-    
+
     let path_arg = args.get(0);
     let path_string = path_arg.to_string(scope).unwrap();
     let path = path_string.to_rust_string_lossy(scope);
-    
+
     match fs::read_to_string(&path) {
         Ok(content) => {
             let result = v8::String::new(scope, &content).unwrap();
@@ -361,15 +386,15 @@ fn simple_write_file_sync(
         scope.throw_exception(error);
         return;
     }
-    
+
     let path_arg = args.get(0);
     let path_string = path_arg.to_string(scope).unwrap();
     let path = path_string.to_rust_string_lossy(scope);
-    
+
     let data_arg = args.get(1);
     let data_string = data_arg.to_string(scope).unwrap();
     let data = data_string.to_rust_string_lossy(scope);
-    
+
     if let Err(e) = fs::write(&path, data) {
         let error_msg = format!("Failed to write file '{}': {}", path, e);
         let error_str = v8::String::new(scope, &error_msg).unwrap();
@@ -387,11 +412,11 @@ fn simple_exists_sync(
         rv.set(v8::Boolean::new(scope, false).into());
         return;
     }
-    
+
     let path_arg = args.get(0);
     let path_string = path_arg.to_string(scope).unwrap();
     let path = path_string.to_rust_string_lossy(scope);
-    
+
     let exists = Path::new(&path).exists();
     rv.set(v8::Boolean::new(scope, exists).into());
 }
@@ -402,14 +427,14 @@ fn simple_path_join(
     mut rv: v8::ReturnValue,
 ) {
     let mut path_buf = std::path::PathBuf::new();
-    
+
     for i in 0..args.length() {
         let arg = args.get(i);
         let str_string = arg.to_string(scope).unwrap();
         let part = str_string.to_rust_string_lossy(scope);
         path_buf.push(part);
     }
-    
+
     let result = v8::String::new(scope, &path_buf.to_string_lossy()).unwrap();
     rv.set(result.into());
 }
@@ -431,13 +456,13 @@ fn simple_create_server(
 ) {
     // Create a simple server object
     let server_obj = v8::Object::new(scope);
-    
+
     // listen method
     let listen_key = v8::String::new(scope, "listen").unwrap();
     let listen_template = v8::FunctionTemplate::new(scope, simple_server_listen);
     let listen_fn = listen_template.get_function(scope).unwrap();
     server_obj.set(scope, listen_key.into(), listen_fn.into());
-    
+
     rv.set(server_obj.into());
 }
 
@@ -451,9 +476,9 @@ fn simple_server_listen(
     } else {
         3000
     };
-    
+
     println!("HTTP server listening on port {}", port);
-    
+
     // Execute callback if provided
     if args.length() > 1 && args.get(1).is_function() {
         let callback = v8::Local::<v8::Function>::try_from(args.get(1)).unwrap();

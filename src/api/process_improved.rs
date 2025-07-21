@@ -4,7 +4,10 @@ use std::env;
 use v8;
 
 /// Improved process object with full Node.js compatibility
-pub fn setup_process_object(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
+pub fn setup_process_object(
+    scope: &mut v8::HandleScope,
+    context: v8::Local<v8::Context>,
+) -> Result<()> {
     let global = context.global(scope);
 
     // Create process object
@@ -42,7 +45,10 @@ pub fn setup_process_object(scope: &mut v8::HandleScope, context: v8::Local<v8::
 }
 
 /// Setup process.env with actual environment variables
-fn setup_process_env(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_env(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let env_obj = v8::Object::new(scope);
 
     // Get all environment variables
@@ -74,7 +80,10 @@ fn setup_process_env(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Ob
 }
 
 /// Setup process.argv
-fn setup_process_argv(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_argv(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let argv_array = v8::Array::new(scope, 0);
 
     // Add kiren executable path
@@ -95,7 +104,10 @@ fn setup_process_argv(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::O
 }
 
 /// Setup process.cwd()
-fn setup_process_cwd(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_cwd(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let cwd_key = v8::String::new(scope, "cwd").unwrap();
     let cwd_template = v8::FunctionTemplate::new(scope, process_cwd);
     let cwd_function = cwd_template.get_function(scope).unwrap();
@@ -105,7 +117,10 @@ fn setup_process_cwd(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Ob
 }
 
 /// Setup process.exit()
-fn setup_process_exit(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_exit(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let exit_key = v8::String::new(scope, "exit").unwrap();
     let exit_template = v8::FunctionTemplate::new(scope, process_exit);
     let exit_function = exit_template.get_function(scope).unwrap();
@@ -115,7 +130,10 @@ fn setup_process_exit(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::O
 }
 
 /// Setup process.nextTick()
-fn setup_process_next_tick(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_next_tick(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let next_tick_key = v8::String::new(scope, "nextTick").unwrap();
     let next_tick_template = v8::FunctionTemplate::new(scope, process_next_tick);
     let next_tick_function = next_tick_template.get_function(scope).unwrap();
@@ -125,7 +143,10 @@ fn setup_process_next_tick(scope: &mut v8::HandleScope, process_obj: &v8::Local<
 }
 
 /// Setup process.version
-fn setup_process_version(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_version(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let version_key = v8::String::new(scope, "version").unwrap();
     let version_value = v8::String::new(scope, "v18.0.0").unwrap(); // Fake Node.js version
     process_obj.set(scope, version_key.into(), version_value.into());
@@ -134,9 +155,12 @@ fn setup_process_version(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8
 }
 
 /// Setup process.platform
-fn setup_process_platform(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_platform(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let platform_key = v8::String::new(scope, "platform").unwrap();
-    
+
     let platform_name = if cfg!(target_os = "windows") {
         "win32"
     } else if cfg!(target_os = "macos") {
@@ -154,9 +178,12 @@ fn setup_process_platform(scope: &mut v8::HandleScope, process_obj: &v8::Local<v
 }
 
 /// Setup process.arch
-fn setup_process_arch(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+fn setup_process_arch(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     let arch_key = v8::String::new(scope, "arch").unwrap();
-    
+
     let arch_name = if cfg!(target_arch = "x86_64") {
         "x64"
     } else if cfg!(target_arch = "x86") {
@@ -224,7 +251,7 @@ fn process_next_tick(
     // For now, execute immediately (should be queued for next tick)
     let callback_fn = unsafe { v8::Local::<v8::Function>::cast(callback) };
     let undefined = v8::undefined(scope);
-    
+
     // Get additional arguments to pass to callback
     let mut callback_args = Vec::new();
     for i in 1..args.length() {
@@ -244,7 +271,10 @@ fn process_next_tick(
 }
 
 /// Enhanced process object setup for better Node.js compatibility
-pub fn setup_process_signals(scope: &mut v8::HandleScope, process_obj: &v8::Local<v8::Object>) -> Result<()> {
+pub fn setup_process_signals(
+    scope: &mut v8::HandleScope,
+    process_obj: &v8::Local<v8::Object>,
+) -> Result<()> {
     // Add process.on() for signal handling
     let on_key = v8::String::new(scope, "on").unwrap();
     let on_template = v8::FunctionTemplate::new(scope, process_on);
@@ -334,7 +364,7 @@ fn process_emit(
     let event_name = event_str.to_rust_string_lossy(scope);
 
     println!("Process event emitted: {}", event_name);
-    
+
     // TODO: Actually emit to registered listeners
     rv.set(v8::Boolean::new(scope, true).into());
 }

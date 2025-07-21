@@ -16,7 +16,10 @@ pub struct StackFrame {
     pub source_line: Option<String>,
 }
 
-pub fn setup_error_handling(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
+pub fn setup_error_handling(
+    scope: &mut v8::HandleScope,
+    context: v8::Local<v8::Context>,
+) -> Result<()> {
     let global = context.global(scope);
 
     // Enhanced Error constructor
@@ -29,13 +32,21 @@ pub fn setup_error_handling(scope: &mut v8::HandleScope, context: v8::Local<v8::
     let error_handler_key = v8::String::new(scope, "__kirenErrorHandler").unwrap();
     let error_handler_template = v8::FunctionTemplate::new(scope, global_error_handler);
     let error_handler_function = error_handler_template.get_function(scope).unwrap();
-    global.set(scope, error_handler_key.into(), error_handler_function.into());
+    global.set(
+        scope,
+        error_handler_key.into(),
+        error_handler_function.into(),
+    );
 
     // Unhandled promise rejection handler
     let promise_handler_key = v8::String::new(scope, "__kirenPromiseRejectionHandler").unwrap();
     let promise_handler_template = v8::FunctionTemplate::new(scope, promise_rejection_handler);
     let promise_handler_function = promise_handler_template.get_function(scope).unwrap();
-    global.set(scope, promise_handler_key.into(), promise_handler_function.into());
+    global.set(
+        scope,
+        promise_handler_key.into(),
+        promise_handler_function.into(),
+    );
 
     Ok(())
 }
@@ -55,7 +66,7 @@ fn enhanced_error_constructor(
 
     // Create error object
     let error_obj = v8::Object::new(scope);
-    
+
     // Set message
     let message_key = v8::String::new(scope, "message").unwrap();
     let message_val = v8::String::new(scope, &message).unwrap();
@@ -86,10 +97,10 @@ fn global_error_handler(
 
     let error = args.get(0);
     let error_info = extract_error_info(scope, error);
-    
+
     eprintln!("Uncaught Error: {}", error_info.message);
     eprintln!("{}", error_info.stack);
-    
+
     // Exit with error code
     std::process::exit(1);
 }
@@ -105,7 +116,7 @@ fn promise_rejection_handler(
 
     let reason = args.get(0);
     let error_info = extract_error_info(scope, reason);
-    
+
     eprintln!("Unhandled Promise Rejection: {}", error_info.message);
     eprintln!("{}", error_info.stack);
 }
@@ -113,33 +124,32 @@ fn promise_rejection_handler(
 fn generate_stack_trace(scope: &mut v8::HandleScope) -> String {
     // Get V8 stack trace
     let stack_trace = v8::StackTrace::current_stack_trace(scope, 10);
-    
+
     if let Some(trace) = stack_trace {
         let mut stack_lines = Vec::new();
-        
+
         for i in 0..trace.get_frame_count() {
             if let Some(frame) = trace.get_frame(scope, i) {
-                let function_name = frame.get_function_name(scope)
+                let function_name = frame
+                    .get_function_name(scope)
                     .map(|name| name.to_rust_string_lossy(scope))
                     .unwrap_or_else(|| "anonymous".to_string());
-                
-                let script_name = frame.get_script_name(scope)
+
+                let script_name = frame
+                    .get_script_name(scope)
                     .map(|name| name.to_rust_string_lossy(scope))
                     .unwrap_or_else(|| "<eval>".to_string());
-                
+
                 let line_number = frame.get_line_number();
                 let column_number = frame.get_column();
-                
+
                 stack_lines.push(format!(
-                    "    at {} ({}:{}:{})", 
-                    function_name, 
-                    script_name, 
-                    line_number, 
-                    column_number
+                    "    at {} ({}:{}:{})",
+                    function_name, script_name, line_number, column_number
                 ));
             }
         }
-        
+
         if stack_lines.is_empty() {
             "    at <anonymous>".to_string()
         } else {
@@ -157,7 +167,7 @@ fn extract_error_info(scope: &mut v8::HandleScope, error: v8::Local<v8::Value>) 
 
     if error.is_object() {
         let error_obj = error.to_object(scope).unwrap();
-        
+
         // Extract message
         let message_key = v8::String::new(scope, "message").unwrap();
         if let Some(message_val) = error_obj.get(scope, message_key.into()) {
@@ -165,7 +175,7 @@ fn extract_error_info(scope: &mut v8::HandleScope, error: v8::Local<v8::Value>) 
                 message = message_str.to_rust_string_lossy(scope);
             }
         }
-        
+
         // Extract stack
         let stack_key = v8::String::new(scope, "stack").unwrap();
         if let Some(stack_val) = error_obj.get(scope, stack_key.into()) {
@@ -190,18 +200,18 @@ fn extract_error_info(scope: &mut v8::HandleScope, error: v8::Local<v8::Value>) 
 
 fn parse_stack_frames(stack: &str) -> Vec<StackFrame> {
     let mut frames = Vec::new();
-    
+
     for line in stack.lines() {
         if line.trim().starts_with("at ") {
             let trimmed = line.trim_start_matches("at ").trim();
-            
+
             // Parse different stack trace formats
             if let Some(frame) = parse_stack_frame(trimmed) {
                 frames.push(frame);
             }
         }
     }
-    
+
     frames
 }
 
@@ -210,18 +220,18 @@ fn parse_stack_frame(frame_str: &str) -> Option<StackFrame> {
     if let Some(paren_pos) = frame_str.rfind('(') {
         let function_name = frame_str[..paren_pos].trim().to_string();
         let location_part = &frame_str[paren_pos + 1..];
-        
+
         if let Some(closing_paren) = location_part.rfind(')') {
             let location = &location_part[..closing_paren];
             return parse_location(&function_name, location);
         }
     }
-    
+
     // Handle format: "file:line:column"
     if frame_str.contains(':') {
         return parse_location("anonymous", frame_str);
     }
-    
+
     // Fallback
     Some(StackFrame {
         function_name: frame_str.to_string(),
@@ -234,12 +244,12 @@ fn parse_stack_frame(frame_str: &str) -> Option<StackFrame> {
 
 fn parse_location(function_name: &str, location: &str) -> Option<StackFrame> {
     let parts: Vec<&str> = location.rsplitn(3, ':').collect();
-    
+
     if parts.len() >= 3 {
         let column = parts[0].parse::<i32>().unwrap_or(0);
         let line = parts[1].parse::<i32>().unwrap_or(0);
         let file = parts[2..].join(":").to_string();
-        
+
         Some(StackFrame {
             function_name: function_name.to_string(),
             file_name: file,
@@ -250,7 +260,7 @@ fn parse_location(function_name: &str, location: &str) -> Option<StackFrame> {
     } else if parts.len() >= 2 {
         let line = parts[0].parse::<i32>().unwrap_or(0);
         let file = parts[1..].join(":").to_string();
-        
+
         Some(StackFrame {
             function_name: function_name.to_string(),
             file_name: file,
@@ -271,23 +281,21 @@ fn parse_location(function_name: &str, location: &str) -> Option<StackFrame> {
 
 pub fn format_error_for_display(error_info: &StackTrace) -> String {
     let mut output = String::new();
-    
+
     output.push_str(&format!("Error: {}\n", error_info.message));
-    
+
     if !error_info.frames.is_empty() {
         output.push_str("Stack trace:\n");
         for (i, frame) in error_info.frames.iter().enumerate() {
-            if i < 10 { // Limit stack trace depth
+            if i < 10 {
+                // Limit stack trace depth
                 output.push_str(&format!(
                     "  at {} ({}:{}:{})\n",
-                    frame.function_name,
-                    frame.file_name,
-                    frame.line_number,
-                    frame.column_number
+                    frame.function_name, frame.file_name, frame.line_number, frame.column_number
                 ));
             }
         }
     }
-    
+
     output
 }

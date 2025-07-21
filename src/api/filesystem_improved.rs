@@ -1,11 +1,14 @@
 use anyhow::Result;
+use base64::prelude::*;
 use std::fs;
 use std::path::Path;
 use v8;
-use base64::prelude::*;
 
 /// Improved filesystem operations with async support
-pub fn setup_filesystem_improved(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
+pub fn setup_filesystem_improved(
+    scope: &mut v8::HandleScope,
+    context: v8::Local<v8::Context>,
+) -> Result<()> {
     let global = context.global(scope);
 
     // Create fs object
@@ -15,12 +18,20 @@ pub fn setup_filesystem_improved(scope: &mut v8::HandleScope, context: v8::Local
     let read_file_sync_key = v8::String::new(scope, "readFileSync").unwrap();
     let read_file_sync_template = v8::FunctionTemplate::new(scope, fs_read_file_sync);
     let read_file_sync_function = read_file_sync_template.get_function(scope).unwrap();
-    fs_obj.set(scope, read_file_sync_key.into(), read_file_sync_function.into());
+    fs_obj.set(
+        scope,
+        read_file_sync_key.into(),
+        read_file_sync_function.into(),
+    );
 
     let write_file_sync_key = v8::String::new(scope, "writeFileSync").unwrap();
     let write_file_sync_template = v8::FunctionTemplate::new(scope, fs_write_file_sync);
     let write_file_sync_function = write_file_sync_template.get_function(scope).unwrap();
-    fs_obj.set(scope, write_file_sync_key.into(), write_file_sync_function.into());
+    fs_obj.set(
+        scope,
+        write_file_sync_key.into(),
+        write_file_sync_function.into(),
+    );
 
     let exists_sync_key = v8::String::new(scope, "existsSync").unwrap();
     let exists_sync_template = v8::FunctionTemplate::new(scope, fs_exists_sync);
@@ -136,19 +147,19 @@ fn fs_read_file_sync(
         Ok(data) => {
             if let Some(enc) = encoding {
                 match enc.as_str() {
-                    "utf8" | "utf-8" => {
-                        match String::from_utf8(data) {
-                            Ok(content) => {
-                                let content_str = v8::String::new(scope, &content).unwrap();
-                                rv.set(content_str.into());
-                            }
-                            Err(_) => {
-                                let error = v8::String::new(scope, &format!("Invalid UTF-8 in file: {}", path)).unwrap();
-                                let exception = v8::Exception::error(scope, error);
-                                scope.throw_exception(exception);
-                            }
+                    "utf8" | "utf-8" => match String::from_utf8(data) {
+                        Ok(content) => {
+                            let content_str = v8::String::new(scope, &content).unwrap();
+                            rv.set(content_str.into());
                         }
-                    }
+                        Err(_) => {
+                            let error =
+                                v8::String::new(scope, &format!("Invalid UTF-8 in file: {}", path))
+                                    .unwrap();
+                            let exception = v8::Exception::error(scope, error);
+                            scope.throw_exception(exception);
+                        }
+                    },
                     "base64" => {
                         let encoded = BASE64_STANDARD.encode(&data);
                         let encoded_str = v8::String::new(scope, &encoded).unwrap();
@@ -167,7 +178,11 @@ fn fs_read_file_sync(
                                 rv.set(content_str.into());
                             }
                             Err(_) => {
-                                let error = v8::String::new(scope, &format!("Cannot decode file as {}: {}", enc, path)).unwrap();
+                                let error = v8::String::new(
+                                    scope,
+                                    &format!("Cannot decode file as {}: {}", enc, path),
+                                )
+                                .unwrap();
                                 let exception = v8::Exception::error(scope, error);
                                 scope.throw_exception(exception);
                             }
@@ -181,7 +196,8 @@ fn fs_read_file_sync(
             }
         }
         Err(e) => {
-            let error = v8::String::new(scope, &format!("Cannot read file '{}': {}", path, e)).unwrap();
+            let error =
+                v8::String::new(scope, &format!("Cannot read file '{}': {}", path, e)).unwrap();
             let exception = v8::Exception::error(scope, error);
             scope.throw_exception(exception);
         }
@@ -236,33 +252,30 @@ fn fs_write_file_sync(
 
     let bytes_to_write = match encoding.as_deref() {
         Some("utf8") | Some("utf-8") => data.into_bytes(),
-        Some("base64") => {
-            match BASE64_STANDARD.decode(&data) {
-                Ok(decoded) => decoded,
-                Err(_) => {
-                    let error = v8::String::new(scope, "Invalid base64 data").unwrap();
-                    let exception = v8::Exception::error(scope, error);
-                    scope.throw_exception(exception);
-                    return;
-                }
+        Some("base64") => match BASE64_STANDARD.decode(&data) {
+            Ok(decoded) => decoded,
+            Err(_) => {
+                let error = v8::String::new(scope, "Invalid base64 data").unwrap();
+                let exception = v8::Exception::error(scope, error);
+                scope.throw_exception(exception);
+                return;
             }
-        }
-        Some("hex") => {
-            match hex::decode(&data) {
-                Ok(decoded) => decoded,
-                Err(_) => {
-                    let error = v8::String::new(scope, "Invalid hex data").unwrap();
-                    let exception = v8::Exception::error(scope, error);
-                    scope.throw_exception(exception);
-                    return;
-                }
+        },
+        Some("hex") => match hex::decode(&data) {
+            Ok(decoded) => decoded,
+            Err(_) => {
+                let error = v8::String::new(scope, "Invalid hex data").unwrap();
+                let exception = v8::Exception::error(scope, error);
+                scope.throw_exception(exception);
+                return;
             }
-        }
+        },
         _ => data.into_bytes(),
     };
 
     if let Err(e) = fs::write(&path, bytes_to_write) {
-        let error = v8::String::new(scope, &format!("Cannot write file '{}': {}", path, e)).unwrap();
+        let error =
+            v8::String::new(scope, &format!("Cannot write file '{}': {}", path, e)).unwrap();
         let exception = v8::Exception::error(scope, error);
         scope.throw_exception(exception);
     }
@@ -369,7 +382,8 @@ fn fs_readdir_sync(
             rv.set(entries_array.into());
         }
         Err(e) => {
-            let error = v8::String::new(scope, &format!("Cannot read directory '{}': {}", path, e)).unwrap();
+            let error = v8::String::new(scope, &format!("Cannot read directory '{}': {}", path, e))
+                .unwrap();
             let exception = v8::Exception::error(scope, error);
             scope.throw_exception(exception);
         }
@@ -417,7 +431,8 @@ fn fs_mkdir_sync(
     };
 
     if let Err(e) = result {
-        let error = v8::String::new(scope, &format!("Cannot create directory '{}': {}", path, e)).unwrap();
+        let error =
+            v8::String::new(scope, &format!("Cannot create directory '{}': {}", path, e)).unwrap();
         let exception = v8::Exception::error(scope, error);
         scope.throw_exception(exception);
     }
@@ -511,7 +526,10 @@ fn fs_write_file(
     }
 }
 
-fn create_buffer_from_bytes<'a>(scope: &'a mut v8::HandleScope, data: &[u8]) -> v8::Local<'a, v8::Object> {
+fn create_buffer_from_bytes<'a>(
+    scope: &'a mut v8::HandleScope,
+    data: &[u8],
+) -> v8::Local<'a, v8::Object> {
     let buffer_obj = v8::Object::new(scope);
 
     // Set length
@@ -540,7 +558,7 @@ fn buffer_to_string(
     mut rv: v8::ReturnValue,
 ) {
     let this = args.this();
-    
+
     let encoding = if args.length() > 0 {
         let enc = args.get(0);
         let enc_str = enc.to_string(scope).unwrap();

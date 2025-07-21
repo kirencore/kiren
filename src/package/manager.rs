@@ -1,12 +1,12 @@
 use anyhow::Result;
-use std::path::PathBuf;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::fs;
 
-use super::resolver::{PackageSpec, PackageResolver};
 use super::cache::GlobalCache;
 use super::registry::KirenRegistry;
+use super::resolver::{PackageResolver, PackageSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Package {
@@ -52,9 +52,8 @@ impl KirenPackageManager {
 
     /// Resolve a package spec to a concrete package
     pub async fn resolve(&self, spec: &str) -> Result<ResolvedPackage> {
-        
         let package_spec = PackageSpec::parse(spec)?;
-        
+
         // Check local cache first
         if let Some(cached) = self.cache.get(&package_spec).await? {
             return Ok(self.build_resolved_package(cached).await?);
@@ -62,20 +61,20 @@ impl KirenPackageManager {
 
         // Fetch from registry
         let package = self.registry.fetch_package(&package_spec).await?;
-        
+
         // Verify integrity
         self.verify_package_integrity(&package)?;
-        
+
         // Store in cache
         self.cache.store(&package).await?;
-        
+
         Ok(self.build_resolved_package(package).await?)
     }
 
     /// Install packages from kiren.toml
     pub async fn install(&self, project_dir: &PathBuf) -> Result<Vec<ResolvedPackage>> {
         let config_path = project_dir.join("kiren.toml");
-        
+
         if !config_path.exists() {
             return Err(anyhow::anyhow!("kiren.toml not found in project directory"));
         }
@@ -85,7 +84,6 @@ impl KirenPackageManager {
 
         let mut resolved_packages = Vec::new();
 
-        
         // Install main dependencies
         for (name, version) in &config.dependencies {
             let spec = format!("{}@{}", name, version);
@@ -118,7 +116,7 @@ impl KirenPackageManager {
 
     async fn build_resolved_package(&self, package: Package) -> Result<ResolvedPackage> {
         let local_path = self.cache.get_package_path(&package);
-        
+
         // Recursively resolve dependencies with Box::pin
         let mut dependencies = Vec::new();
         for (dep_name, dep_version) in &package.dependencies {
@@ -164,14 +162,14 @@ impl KirenPackageManager {
 
         let config_path = project_dir.join("kiren.toml");
         let config_content = toml::to_string_pretty(&config)?;
-        
+
         fs::create_dir_all(project_dir).await?;
         fs::write(&config_path, config_content).await?;
 
         // Create basic project structure
         let src_dir = project_dir.join("src");
         fs::create_dir_all(&src_dir).await?;
-        
+
         let main_js = src_dir.join("main.js");
         let main_content = r#"// Welcome to Kiren!
 console.log("Hello from Kiren!");
@@ -184,7 +182,6 @@ console.log("Hello from Kiren!");
 "#;
         fs::write(&main_js, main_content).await?;
 
-        
         Ok(())
     }
 }

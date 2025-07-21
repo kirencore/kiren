@@ -1,18 +1,18 @@
 use anyhow::Result;
+use hyper::{Body, Response, StatusCode};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use hyper::{Body, Response, StatusCode};
 
 #[derive(Debug, Clone)]
 pub struct StaticOptions {
-    pub dotfiles: String,         // "allow", "deny", "ignore"
+    pub dotfiles: String,        // "allow", "deny", "ignore"
     pub etag: bool,              // Enable/disable etag generation
     pub extensions: Vec<String>, // File extensions to try
     pub index: Option<String>,   // Index file name, None to disable
-    pub max_age: u64,           // Cache max-age in seconds
-    pub redirect: bool,         // Redirect trailing slash
-    pub set_headers: bool,      // Allow custom headers
+    pub max_age: u64,            // Cache max-age in seconds
+    pub redirect: bool,          // Redirect trailing slash
+    pub set_headers: bool,       // Allow custom headers
 }
 
 impl Default for StaticOptions {
@@ -78,11 +78,11 @@ impl StaticMiddleware {
     fn sanitize_path(&self, path: &str) -> Result<String> {
         // Remove leading slash and resolve relative paths
         let clean_path = path.trim_start_matches('/');
-        
+
         // Prevent directory traversal
         let path_buf = PathBuf::from(clean_path);
         let mut safe_components = Vec::new();
-        
+
         for component in path_buf.components() {
             match component {
                 std::path::Component::Normal(name) => {
@@ -95,7 +95,7 @@ impl StaticMiddleware {
                 _ => continue,
             }
         }
-        
+
         Ok(safe_components.join("/"))
     }
 
@@ -110,7 +110,7 @@ impl StaticMiddleware {
                 return self.serve_static_file(&path_with_ext).await;
             }
         }
-        
+
         self.not_found_response().await
     }
 
@@ -136,7 +136,8 @@ impl StaticMiddleware {
 
                 // Add caching headers
                 if self.options.max_age > 0 {
-                    response = response.header("cache-control", format!("max-age={}", self.options.max_age));
+                    response = response
+                        .header("cache-control", format!("max-age={}", self.options.max_age));
                 }
 
                 // Add ETag if enabled
@@ -192,14 +193,16 @@ impl StaticMiddleware {
         Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("content-type", "text/plain")
-            .body(Body::from("File not found")).unwrap())
+            .body(Body::from("File not found"))
+            .unwrap())
     }
 
     async fn forbidden_response(&self) -> Result<Response<Body>> {
         Ok(Response::builder()
             .status(StatusCode::FORBIDDEN)
             .header("content-type", "text/plain")
-            .body(Body::from("Forbidden")).unwrap())
+            .body(Body::from("Forbidden"))
+            .unwrap())
     }
 }
 
@@ -213,7 +216,7 @@ pub fn should_handle_static(path: &str, mount_path: &str) -> bool {
     if mount_path == "/" || mount_path.is_empty() {
         return true;
     }
-    
+
     path.starts_with(mount_path)
 }
 
@@ -222,7 +225,7 @@ pub fn strip_mount_path(path: &str, mount_path: &str) -> String {
     if mount_path == "/" || mount_path.is_empty() {
         return path.to_string();
     }
-    
+
     path.strip_prefix(mount_path)
         .unwrap_or(path)
         .trim_start_matches('/')

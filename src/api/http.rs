@@ -8,10 +8,10 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tokio::time::timeout;
 use uuid::Uuid;
 use v8;
-use tokio::sync::broadcast;
 
 // HTTP callback execution system
 #[derive(Debug, Clone)]
@@ -37,14 +37,15 @@ pub struct HttpCallbackResponse {
 struct RouteInfo {
     method: String,
     path: String,
-    callback_id: Option<String>, // V8 callback function ID
+    callback_id: Option<String>,     // V8 callback function ID
     static_response: Option<String>, // For string responses
 }
 
 static ROUTES: Lazy<Arc<Mutex<Vec<RouteInfo>>>> = Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
 // Server shutdown management
-static SHUTDOWN_SENDER: Lazy<Arc<Mutex<Option<broadcast::Sender<()>>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+static SHUTDOWN_SENDER: Lazy<Arc<Mutex<Option<broadcast::Sender<()>>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(None)));
 
 // Simplified approach - removed complex callback system
 
@@ -52,7 +53,7 @@ pub fn shutdown_http_servers() {
     if let Some(sender) = SHUTDOWN_SENDER.lock().unwrap().as_ref() {
         let _ = sender.send(()); // Ignore error if no receivers
     }
-    
+
     // Clear routes for fresh start
     ROUTES.lock().unwrap().clear();
 }
@@ -80,7 +81,6 @@ pub fn create_server(
     _args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
-    
     // Create server object
     let server_obj = v8::Object::new(scope);
 
@@ -131,7 +131,7 @@ fn server_listen(
     // Create new shutdown channel for this server
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
     *SHUTDOWN_SENDER.lock().unwrap() = Some(shutdown_tx);
-    
+
     // Start server in background thread
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -159,11 +159,7 @@ fn server_post(
     register_route(scope, args, "POST");
 }
 
-fn register_route(
-    scope: &mut v8::HandleScope,
-    args: v8::FunctionCallbackArguments,
-    method: &str,
-) {
+fn register_route(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, method: &str) {
     if args.length() < 2 {
         return;
     }
@@ -173,12 +169,12 @@ fn register_route(
     let path = path_str.to_rust_string_lossy(scope);
 
     let callback_arg = args.get(1);
-    
+
     let route = if callback_arg.is_string() {
         // Static string response
         let response_str = callback_arg.to_string(scope).unwrap();
         let response = response_str.to_rust_string_lossy(scope);
-        
+
         RouteInfo {
             method: method.to_string(),
             path: path.clone(),
@@ -188,30 +184,35 @@ fn register_route(
     } else if callback_arg.is_function() {
         // Function callback - execute immediately to get return value
         let callback_fn: v8::Local<v8::Function> = callback_arg.try_into().unwrap();
-        
+
         // Create mock request/response objects for immediate execution
         let undefined = v8::undefined(scope);
         let args = [];
-        
+
         // Execute the callback immediately
         if let Some(result) = callback_fn.call(scope, undefined.into(), &args) {
             let response = if result.is_object() && !result.is_string() {
                 // Object result - convert to JSON
                 let json_stringify_key = v8::String::new(scope, "JSON").unwrap();
                 let global = scope.get_current_context().global(scope);
-                
+
                 if let Some(json_obj) = global.get(scope, json_stringify_key.into()) {
                     if let Ok(json_obj) = json_obj.try_into() {
                         let json_obj: v8::Local<v8::Object> = json_obj;
                         let stringify_key = v8::String::new(scope, "stringify").unwrap();
-                        
+
                         if let Some(stringify_fn) = json_obj.get(scope, stringify_key.into()) {
                             if let Ok(stringify_fn) = stringify_fn.try_into() {
                                 let stringify_fn: v8::Local<v8::Function> = stringify_fn;
                                 let args = [result];
-                                
-                                if let Some(json_result) = stringify_fn.call(scope, json_obj.into(), &args) {
-                                    json_result.to_string(scope).unwrap().to_rust_string_lossy(scope)
+
+                                if let Some(json_result) =
+                                    stringify_fn.call(scope, json_obj.into(), &args)
+                                {
+                                    json_result
+                                        .to_string(scope)
+                                        .unwrap()
+                                        .to_rust_string_lossy(scope)
                                 } else {
                                     result.to_string(scope).unwrap().to_rust_string_lossy(scope)
                                 }
@@ -231,7 +232,7 @@ fn register_route(
                 // String or primitive result
                 result.to_string(scope).unwrap().to_rust_string_lossy(scope)
             };
-            
+
             RouteInfo {
                 method: method.to_string(),
                 path: path.clone(),
@@ -278,38 +279,38 @@ fn server_delete(
 
 async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) -> Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    
-    let make_svc = make_service_fn(|_conn| async { 
-        Ok::<_, Infallible>(service_fn(handle_request_with_timeout)) 
+
+    let make_svc = make_service_fn(|_conn| async {
+        Ok::<_, Infallible>(service_fn(handle_request_with_timeout))
     });
 
     // Enhanced server configuration for production
     let server = Server::bind(&addr)
-        .http1_keepalive(true)               // Enable keep-alive
-        .http1_half_close(false)             // Disable half-close for better connection reuse  
-        .tcp_nodelay(true)                   // Disable Nagle's algorithm for lower latency
-        .tcp_keepalive(Some(Duration::from_secs(60)))  // TCP keep-alive
+        .http1_keepalive(true) // Enable keep-alive
+        .http1_half_close(false) // Disable half-close for better connection reuse
+        .tcp_nodelay(true) // Disable Nagle's algorithm for lower latency
+        .tcp_keepalive(Some(Duration::from_secs(60))) // TCP keep-alive
         .serve(make_svc);
-        
+
     eprintln!("🚀 HTTP server listening on http://127.0.0.1:{}", port);
     eprintln!("✅ Enhanced connection handling enabled (keep-alive, timeouts, security)");
-    
+
     // Graceful shutdown with broadcast receiver
     let graceful = server.with_graceful_shutdown(async {
         let _ = shutdown_rx.recv().await;
         eprintln!("🛑 Shutting down HTTP server on port {}", port);
     });
-    
+
     if let Err(e) = graceful.await {
         eprintln!("❌ Server error: {}", e);
         return Err(e.into());
     }
-    
+
     eprintln!("✅ HTTP server on port {} shutdown complete", port);
     Ok(())
 }
 
-// Request handler with timeout protection  
+// Request handler with timeout protection
 async fn handle_request_with_timeout(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     // Apply request timeout (30 seconds)
     match timeout(Duration::from_secs(30), handle_request(req)).await {
@@ -319,7 +320,9 @@ async fn handle_request_with_timeout(req: Request<Body>) -> Result<Response<Body
             Ok(Response::builder()
                 .status(StatusCode::REQUEST_TIMEOUT)
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"error":"Request timeout - processing took too long"}"#))
+                .body(Body::from(
+                    r#"{"error":"Request timeout - processing took too long"}"#,
+                ))
                 .unwrap())
         }
     }
@@ -331,19 +334,33 @@ const MAX_REQUEST_SIZE: u64 = 10 * 1024 * 1024;
 // Helper function to add security headers to responses
 fn add_security_headers(response: Response<Body>) -> Response<Body> {
     let (mut parts, body) = response.into_parts();
-    
+
     // Security headers for production
-    parts.headers.insert("x-frame-options", "DENY".parse().unwrap());
-    parts.headers.insert("x-content-type-options", "nosniff".parse().unwrap());
-    parts.headers.insert("x-xss-protection", "1; mode=block".parse().unwrap());
-    parts.headers.insert("referrer-policy", "strict-origin-when-cross-origin".parse().unwrap());
-    parts.headers.insert("content-security-policy", "default-src 'self'".parse().unwrap());
-    
+    parts
+        .headers
+        .insert("x-frame-options", "DENY".parse().unwrap());
+    parts
+        .headers
+        .insert("x-content-type-options", "nosniff".parse().unwrap());
+    parts
+        .headers
+        .insert("x-xss-protection", "1; mode=block".parse().unwrap());
+    parts.headers.insert(
+        "referrer-policy",
+        "strict-origin-when-cross-origin".parse().unwrap(),
+    );
+    parts.headers.insert(
+        "content-security-policy",
+        "default-src 'self'".parse().unwrap(),
+    );
+
     // Restrict CORS to specific origins in production (currently allowing all for development)
     if !parts.headers.contains_key("access-control-allow-origin") {
-        parts.headers.insert("access-control-allow-origin", "*".parse().unwrap());
+        parts
+            .headers
+            .insert("access-control-allow-origin", "*".parse().unwrap());
     }
-    
+
     Response::from_parts(parts, body)
 }
 
@@ -365,7 +382,10 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
         let error_response = Response::builder()
             .status(StatusCode::PAYLOAD_TOO_LARGE)
             .header("content-type", "application/json")
-            .body(Body::from(format!(r#"{{"error":"Request too large. Maximum size is {} bytes"}}"#, MAX_REQUEST_SIZE)))
+            .body(Body::from(format!(
+                r#"{{"error":"Request too large. Maximum size is {} bytes"}}"#,
+                MAX_REQUEST_SIZE
+            )))
             .unwrap();
         return Ok(add_security_headers(error_response));
     }
@@ -380,15 +400,17 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
             if route.method == method && route.path == path {
                 if let Some(response) = &route.static_response {
                     // Determine content type based on response content
-                    let content_type = if response.trim_start().starts_with('{') || response.trim_start().starts_with('[') {
+                    let content_type = if response.trim_start().starts_with('{')
+                        || response.trim_start().starts_with('[')
+                    {
                         "application/json"
                     } else {
                         "text/plain"
                     };
-                    
+
                     let response = Response::builder()
                         .header("content-type", content_type)
-                        .header("access-control-allow-origin", "*")  // CORS support
+                        .header("access-control-allow-origin", "*") // CORS support
                         .body(Body::from(response.clone()))
                         .unwrap();
                     return Ok(add_security_headers(response));

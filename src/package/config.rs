@@ -4,16 +4,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     pub package: PackageInfo,
-    
+
     #[serde(default)]
     pub dependencies: HashMap<String, String>,
-    
+
     #[serde(default, rename = "dev-dependencies")]
     pub dev_dependencies: HashMap<String, String>,
-    
+
     #[serde(default)]
     pub scripts: HashMap<String, String>,
-    
+
     #[serde(default)]
     pub config: HashMap<String, String>,
 }
@@ -22,16 +22,16 @@ pub struct ProjectConfig {
 pub struct PackageInfo {
     pub name: String,
     pub version: String,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    
+
     #[serde(default = "default_runtime")]
     pub runtime: String,
 }
@@ -75,12 +75,14 @@ impl ProjectConfig {
 
     /// Add a dependency
     pub fn add_dependency(&mut self, name: &str, version: &str) {
-        self.dependencies.insert(name.to_string(), version.to_string());
+        self.dependencies
+            .insert(name.to_string(), version.to_string());
     }
 
     /// Add a dev dependency
     pub fn add_dev_dependency(&mut self, name: &str, version: &str) {
-        self.dev_dependencies.insert(name.to_string(), version.to_string());
+        self.dev_dependencies
+            .insert(name.to_string(), version.to_string());
     }
 
     /// Add a script
@@ -96,11 +98,11 @@ impl ProjectConfig {
     /// Get all dependencies (including dev dependencies in dev mode)
     pub fn get_all_dependencies(&self, include_dev: bool) -> HashMap<String, String> {
         let mut all_deps = self.dependencies.clone();
-        
+
         if include_dev {
             all_deps.extend(self.dev_dependencies.clone());
         }
-        
+
         all_deps
     }
 
@@ -113,8 +115,16 @@ impl ProjectConfig {
             errors.push("Package name cannot be empty".to_string());
         }
 
-        if !self.package.name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-            errors.push("Package name can only contain alphanumeric characters, hyphens, and underscores".to_string());
+        if !self
+            .package
+            .name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            errors.push(
+                "Package name can only contain alphanumeric characters, hyphens, and underscores"
+                    .to_string(),
+            );
         }
 
         // Validate version format (basic semver check)
@@ -162,9 +172,7 @@ fn is_valid_semver(version: &str) -> bool {
         return false;
     }
 
-    parts.iter().all(|part| {
-        part.parse::<u32>().is_ok()
-    })
+    parts.iter().all(|part| part.parse::<u32>().is_ok())
 }
 
 /// Package configuration for publishing
@@ -174,10 +182,10 @@ pub struct PublishConfig {
     pub access: AccessLevel,
     pub files: Option<Vec<String>>,
     pub ignore: Option<Vec<String>>,
-    
+
     #[serde(default)]
     pub keywords: Vec<String>,
-    
+
     #[serde(default)]
     pub categories: Vec<String>,
 }
@@ -233,7 +241,7 @@ mod tests {
         assert!(is_valid_semver("1.0.0"));
         assert!(is_valid_semver("0.1.2"));
         assert!(is_valid_semver("10.20.30"));
-        
+
         assert!(!is_valid_semver("1.0"));
         assert!(!is_valid_semver("1.0.0.1"));
         assert!(!is_valid_semver("v1.0.0"));
@@ -245,7 +253,7 @@ mod tests {
         let config = ProjectConfig::new("test-app");
         let toml_string = config.to_toml().unwrap();
         let parsed_config = ProjectConfig::from_toml(&toml_string).unwrap();
-        
+
         assert_eq!(config.package.name, parsed_config.package.name);
         assert_eq!(config.package.version, parsed_config.package.version);
     }

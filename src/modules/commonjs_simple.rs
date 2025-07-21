@@ -1,6 +1,6 @@
 use anyhow::Result;
-use v8;
 use std::collections::HashMap;
+use v8;
 
 // Simplified CommonJS support
 pub fn setup_commonjs(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) -> Result<()> {
@@ -84,13 +84,13 @@ fn global_require(
         }
         "http" => {
             let http_obj = v8::Object::new(scope);
-            
+
             // Add createServer function
             let create_server_key = v8::String::new(scope, "createServer").unwrap();
             let create_server_tmpl = v8::FunctionTemplate::new(scope, http_create_server);
             let create_server_fn = create_server_tmpl.get_function(scope).unwrap();
             http_obj.set(scope, create_server_key.into(), create_server_fn.into());
-            
+
             rv.set(http_obj.into());
             return;
         }
@@ -98,19 +98,19 @@ fn global_require(
             // Create express function that returns an app
             let express_tmpl = v8::FunctionTemplate::new(scope, express_create_app);
             let express_fn = express_tmpl.get_function(scope).unwrap();
-            
+
             // Add static Router property
             let router_key = v8::String::new(scope, "Router").unwrap();
             let router_tmpl = v8::FunctionTemplate::new(scope, express_create_router);
             let router_fn = router_tmpl.get_function(scope).unwrap();
             express_fn.set(scope, router_key.into(), router_fn.into());
-            
+
             // Add static static property
             let static_key = v8::String::new(scope, "static").unwrap();
             let static_tmpl = v8::FunctionTemplate::new(scope, express_create_static);
             let static_fn = static_tmpl.get_function(scope).unwrap();
             express_fn.set(scope, static_key.into(), static_fn.into());
-            
+
             rv.set(express_fn.into());
             return;
         }
@@ -207,20 +207,20 @@ fn http_create_server(
 ) {
     // Create server object
     let server_obj = v8::Object::new(scope);
-    
+
     // Store the callback function if provided
     if args.length() > 0 {
         let callback = args.get(0);
         let callback_key = v8::String::new(scope, "_requestCallback").unwrap();
         server_obj.set(scope, callback_key.into(), callback);
     }
-    
+
     // Add listen method
     let listen_key = v8::String::new(scope, "listen").unwrap();
     let listen_tmpl = v8::FunctionTemplate::new(scope, http_server_listen);
     let listen_fn = listen_tmpl.get_function(scope).unwrap();
     server_obj.set(scope, listen_key.into(), listen_fn.into());
-    
+
     rv.set(server_obj.into());
 }
 
@@ -232,11 +232,11 @@ fn http_server_listen(
     if args.length() == 0 {
         return;
     }
-    
+
     let port_arg = args.get(0);
     let port_str = port_arg.to_string(scope).unwrap();
     let port = port_str.to_rust_string_lossy(scope);
-    
+
     // Call the callback if provided (second argument)
     if args.length() > 1 {
         let callback = args.get(1);
@@ -247,7 +247,7 @@ fn http_server_listen(
             let _ = callback_fn.call(scope, this_obj.into(), &no_args);
         }
     }
-    
+
     println!("HTTP Server listening on port {}", port);
 }
 
@@ -366,9 +366,9 @@ fn express_static_middleware(
         if let Some(url_val) = req_obj.get(scope, url_key.into()) {
             let url_str = url_val.to_string(scope).unwrap();
             let url = url_str.to_rust_string_lossy(scope);
-            
+
             println!("Static middleware handling: {}", url);
-            
+
             // Call next() to continue
             if let Ok(next_fn) = v8::Local::<v8::Function>::try_from(next) {
                 let undefined = v8::undefined(scope);
@@ -419,7 +419,7 @@ fn express_app_use(
     if args.length() == 0 {
         return;
     }
-    
+
     let _path_pattern = if args.length() == 1 {
         // app.use(middleware) - global middleware
         "*".to_string()
@@ -429,7 +429,7 @@ fn express_app_use(
         let path_str = path_arg.to_string(scope).unwrap();
         path_str.to_rust_string_lossy(scope)
     };
-    
+
     println!("Middleware registered");
 }
 
