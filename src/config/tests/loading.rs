@@ -11,7 +11,7 @@ fn test_config_file_search() {
 #[test]
 fn test_default_config_values() {
     let config = KirenConfig::default();
-    
+
     // Test default values
     assert_eq!(config.server.default_port, 3000);
     assert!(config.runtime.memory_limit.is_some());
@@ -23,7 +23,7 @@ fn test_default_config_values() {
 fn test_config_loading_fallback() {
     // Test that load() function doesn't panic even when no config file exists
     let config = KirenConfig::load();
-    
+
     // Should fall back to defaults
     assert_eq!(config.server.default_port, 3000);
     assert!(!config.runtime.version.is_empty());
@@ -32,12 +32,8 @@ fn test_config_loading_fallback() {
 #[test]
 fn test_config_file_priority() {
     // Test that find_config_file follows the correct priority order
-    let _possible_configs = [
-        "kiren.toml",
-        "kiren.config.toml", 
-        ".kirenrc.toml"
-    ];
-    
+    let _possible_configs = ["kiren.toml", "kiren.config.toml", ".kirenrc.toml"];
+
     // The function should prefer files in this order
     // We just test that it doesn't panic and returns a valid result
     let result = KirenConfig::find_config_file();

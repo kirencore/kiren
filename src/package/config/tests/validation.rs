@@ -22,11 +22,11 @@ fn test_package_info_validation() {
         license: Some("MIT".to_string()),
         author: None,
     };
-    
+
     // Valid package info should pass
     assert!(is_valid_semver(&package_info.version));
     assert!(!package_info.name.is_empty());
-    
+
     // Invalid version should fail
     package_info.version = "invalid".to_string();
     assert!(!is_valid_semver(&package_info.version));
@@ -35,15 +35,15 @@ fn test_package_info_validation() {
 #[test]
 fn test_project_validation_empty_name() {
     let mut config = ProjectConfig::new("valid-name");
-    
+
     // Valid config should pass
     assert!(config.validate().is_ok());
-    
+
     // Empty name should fail
     config.package.name = "".to_string();
     let result = config.validate();
     assert!(result.is_err());
-    
+
     if let Err(errors) = result {
         assert!(!errors.is_empty());
         assert!(errors.iter().any(|e| e.contains("name")));
@@ -53,15 +53,15 @@ fn test_project_validation_empty_name() {
 #[test]
 fn test_project_validation_invalid_version() {
     let mut config = ProjectConfig::new("test-app");
-    
+
     // Valid config should pass
     assert!(config.validate().is_ok());
-    
+
     // Invalid version should fail
     config.package.version = "not-a-version".to_string();
     let result = config.validate();
     assert!(result.is_err());
-    
+
     if let Err(errors) = result {
         assert!(!errors.is_empty());
         assert!(errors.iter().any(|e| e.contains("version")));
@@ -71,14 +71,14 @@ fn test_project_validation_invalid_version() {
 #[test]
 fn test_project_validation_multiple_errors() {
     let mut config = ProjectConfig::new("test-app");
-    
+
     // Create multiple validation errors
     config.package.name = "".to_string();
     config.package.version = "invalid".to_string();
-    
+
     let result = config.validate();
     assert!(result.is_err());
-    
+
     if let Err(errors) = result {
         assert!(errors.len() >= 2);
     }

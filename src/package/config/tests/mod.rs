@@ -1,4 +1,4 @@
 mod project;
-mod validation;
-mod serialization;
 mod publish;
+mod serialization;
+mod validation;

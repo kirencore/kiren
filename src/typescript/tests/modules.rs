@@ -14,7 +14,7 @@ export default class MyComponent extends Component {
 "#;
 
     let result = transpiler.transpile(typescript);
-    
+
     // Should not panic with imports/exports
     assert!(result.is_ok());
 }
