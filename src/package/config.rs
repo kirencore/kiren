@@ -217,45 +217,4 @@ impl Default for PublishConfig {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_project_config_creation() {
-        let config = ProjectConfig::new("test-app");
-        assert_eq!(config.package.name, "test-app");
-        assert_eq!(config.package.version, "1.0.0");
-        assert_eq!(config.package.runtime, "kiren");
-    }
-
-    #[test]
-    fn test_config_validation() {
-        let mut config = ProjectConfig::new("valid-app");
-        assert!(config.validate().is_ok());
-
-        config.package.name = "".to_string();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_semver_validation() {
-        assert!(is_valid_semver("1.0.0"));
-        assert!(is_valid_semver("0.1.2"));
-        assert!(is_valid_semver("10.20.30"));
-
-        assert!(!is_valid_semver("1.0"));
-        assert!(!is_valid_semver("1.0.0.1"));
-        assert!(!is_valid_semver("v1.0.0"));
-        assert!(!is_valid_semver("1.0.x"));
-    }
-
-    #[test]
-    fn test_toml_serialization() {
-        let config = ProjectConfig::new("test-app");
-        let toml_string = config.to_toml().unwrap();
-        let parsed_config = ProjectConfig::from_toml(&toml_string).unwrap();
-
-        assert_eq!(config.package.name, parsed_config.package.name);
-        assert_eq!(config.package.version, parsed_config.package.version);
-    }
-}
+mod tests;

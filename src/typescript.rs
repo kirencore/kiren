@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Result};
+
+#[cfg(test)]
+mod tests;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
@@ -258,91 +261,3 @@ pub fn transpile_file_if_typescript<P: AsRef<Path>>(file_path: P) -> Result<Stri
     transpiler.transpile_file(file_path)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_type_annotation_removal() {
-        let transpiler = TypeScriptTranspiler::new();
-
-        let typescript = "function greet(name: string): string { return `Hello ${name}`; }";
-        let expected = "function greet(name) { return `Hello ${name}`; }";
-
-        let result = transpiler.transpile(typescript).unwrap();
-        assert!(result.contains("function greet(name)"));
-    }
-
-    #[test]
-    fn test_interface_removal() {
-        let transpiler = TypeScriptTranspiler::new();
-
-        let typescript = r#"
-interface User {
-    name: string;
-    age: number;
-}
-
-function createUser(data: User): User {
-    return data;
-}
-"#;
-
-        let result = transpiler.transpile(typescript).unwrap();
-        assert!(!result.contains("interface User"));
-        assert!(result.contains("function createUser"));
-    }
-
-    #[test]
-    fn test_enum_conversion() {
-        let transpiler = TypeScriptTranspiler::new();
-
-        let typescript = r#"
-enum Color {
-    Red,
-    Green,
-    Blue
-}
-"#;
-
-        let result = transpiler.transpile(typescript).unwrap();
-        assert!(result.contains("const Color"));
-        assert!(result.contains("Red: 0"));
-        assert!(result.contains("Green: 1"));
-        assert!(result.contains("Blue: 2"));
-    }
-
-    #[test]
-    fn test_decorator_removal() {
-        let transpiler = TypeScriptTranspiler::new();
-
-        let typescript = r#"
-@Controller('users')
-export class UserController {
-    @Get()
-    getUsers(): User[] {
-        return [];
-    }
-}
-"#;
-
-        let result = transpiler.transpile_nestjs(typescript).unwrap();
-        assert!(result.contains("// @Controller"));
-        assert!(result.contains("// @Get"));
-        assert!(result.contains("export class UserController"));
-    }
-
-    #[test]
-    fn test_import_type_removal() {
-        let transpiler = TypeScriptTranspiler::new();
-
-        let typescript = r#"
-import type { User } from './types';
-import { createUser } from './user-service';
-"#;
-
-        let result = transpiler.transpile(typescript).unwrap();
-        assert!(!result.contains("import type"));
-        assert!(result.contains("import { createUser }"));
-    }
-}
