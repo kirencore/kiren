@@ -17,6 +17,9 @@ fn test_env_merge() {
 
 #[test]
 fn test_env_variable_collection() {
+    // Clean up any existing environment variables first
+    std::env::remove_var("KIREN_TEST_VAR");
+
     let mut config = KirenConfig::default();
 
     // Set a test environment variable
@@ -37,23 +40,35 @@ fn test_env_variable_collection() {
 
 #[test]
 fn test_port_override_from_env() {
+    // Clean up any existing environment variables first
+    std::env::remove_var("KIREN_PORT");
+
+    // Wait a bit to ensure cleanup
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
     let mut config = KirenConfig::default();
-    let original_port = config.server.default_port;
+    config.server.default_port = 3000; // Reset to known state
 
     // Set port override
     std::env::set_var("KIREN_PORT", "8080");
+
+    // Wait to ensure env var is set
+    std::thread::sleep(std::time::Duration::from_millis(10));
 
     config.merge_with_env();
 
     // Port should be updated
     assert_eq!(config.server.default_port, 8080);
 
-    // Cleanup
+    // Cleanup immediately
     std::env::remove_var("KIREN_PORT");
 }
 
 #[test]
 fn test_memory_limit_override_from_env() {
+    // Clean up any existing environment variables first
+    std::env::remove_var("KIREN_MEMORY_LIMIT");
+
     let mut config = KirenConfig::default();
 
     // Set memory limit override
@@ -70,10 +85,13 @@ fn test_memory_limit_override_from_env() {
 
 #[test]
 fn test_invalid_env_values_ignored() {
-    // Clean up any existing KIREN_PORT env var first
+    // Clean up any existing environment variables first
     std::env::remove_var("KIREN_PORT");
+    std::env::remove_var("PORT");
 
     let mut config = KirenConfig::default();
+    // Always expect default port regardless of other tests
+    config.server.default_port = 3000; // Reset to known default
     let original_port = config.server.default_port;
 
     // Set invalid port value

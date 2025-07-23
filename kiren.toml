@@ -1,6 +1,8 @@
 # Kiren v2.1 Configuration File
 
 [runtime]
+# Version
+version = "2.1.2"
 # V8 engine flags
 v8_flags = ["--expose-gc", "--max-old-space-size=512"]
 # Memory limit in MB

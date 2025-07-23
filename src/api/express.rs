@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::runtime::engine::Engine;
 use anyhow::Result;
 use hyper::{Body, Request, Response, Server, StatusCode};
 use once_cell::sync::Lazy;
@@ -56,6 +57,31 @@ pub static EXPRESS_ROUTES: Lazy<Arc<Mutex<Vec<Route>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 pub static EXPRESS_MIDDLEWARE: Lazy<Arc<Mutex<Vec<Middleware>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+// Use thread-local engine for middleware execution to reduce overhead
+use std::cell::RefCell;
+thread_local! {
+    static MIDDLEWARE_ENGINE: RefCell<Option<Engine>> = RefCell::new(None);
+}
+
+/// Get or create thread-local engine for middleware execution
+fn get_middleware_engine() -> Result<Engine> {
+    MIDDLEWARE_ENGINE.with(|engine_cell| {
+        let mut engine_opt = engine_cell.borrow_mut();
+        match engine_opt.take() {
+            Some(engine) => Ok(engine),
+            None => Engine::new(),
+        }
+    })
+}
+
+/// Return engine to thread-local storage
+fn return_middleware_engine(engine: Engine) {
+    MIDDLEWARE_ENGINE.with(|engine_cell| {
+        let mut engine_opt = engine_cell.borrow_mut();
+        *engine_opt = Some(engine);
+    });
+}
 
 pub fn setup_express(_scope: &mut v8::HandleScope, _context: v8::Local<v8::Context>) -> Result<()> {
     // Express is now handled through the require() system in npm_simple.rs
@@ -823,10 +849,8 @@ async fn execute_route_callback(
     headers: HashMap<String, String>,
     body: &str,
 ) -> (u16, HashMap<String, String>, String) {
-    // Create a simple V8 context for executing the callback
-    use crate::runtime::engine::Engine;
-
-    let mut engine = Engine::new().unwrap();
+    // Use thread-local engine for better performance
+    let mut engine = get_middleware_engine().unwrap();
 
     // Create callback execution code
     let callback_code = format!(
@@ -921,6 +945,7 @@ async fn execute_route_callback(
                 }
 
                 let body = response_data["body"].as_str().unwrap_or("").to_string();
+                return_middleware_engine(engine);
                 return (status, headers, body);
             }
         }
@@ -936,6 +961,7 @@ async fn execute_route_callback(
     })
     .to_string();
 
+    return_middleware_engine(engine);
     (200, headers, fallback_body)
 }
 
@@ -991,9 +1017,7 @@ async fn execute_middleware(
     request: &RequestContext,
     response: &mut ResponseContext,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    use crate::runtime::engine::Engine;
-
-    let mut engine = Engine::new()?;
+    let mut engine = get_middleware_engine()?;
 
     // Create middleware execution context
     let middleware_code = format!(
@@ -1127,20 +1151,23 @@ async fn execute_middleware(
                             }
                         }
                     }
+                    return_middleware_engine(engine);
                     return Ok(false); // Stop middleware chain
                 }
 
                 // Continue to next middleware if next() was called
+                return_middleware_engine(engine);
                 return Ok(next_called);
             }
         }
         Err(e) => {
-            println!("Middleware execution error: {}", e);
+            return_middleware_engine(engine);
             return Err(format!("Middleware execution failed: {}", e).into());
         }
     }
 
     // Default: continue to next middleware
+    return_middleware_engine(engine);
     Ok(true)
 }
 

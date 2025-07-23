@@ -1,7 +1,41 @@
 use anyhow::Result;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use v8;
+
+// File content cache for performance
+static FILE_CACHE: Lazy<Arc<Mutex<HashMap<String, String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+/// Read file with caching for better performance
+fn read_file_cached(path: &Path) -> Result<String> {
+    let path_str = path.to_string_lossy().to_string();
+
+    // Check cache first
+    {
+        let cache = FILE_CACHE.lock().unwrap();
+        if let Some(cached_content) = cache.get(&path_str) {
+            return Ok(cached_content.clone());
+        }
+    }
+
+    // Read from filesystem
+    let content = fs::read_to_string(path)?;
+
+    // Cache the content
+    {
+        let mut cache = FILE_CACHE.lock().unwrap();
+        if cache.len() < 100 {
+            // Limit cache size
+            cache.insert(path_str, content.clone());
+        }
+    }
+
+    Ok(content)
+}
 
 pub fn setup_npm_compatibility(
     scope: &mut v8::HandleScope,
@@ -125,7 +159,7 @@ fn try_node_modules_resolution<'a>(
 
     if package_json_path.exists() {
         println!("✓ package.json exists");
-        if let Ok(package_content) = fs::read_to_string(&package_json_path) {
+        if let Ok(package_content) = read_file_cached(&package_json_path) {
             println!("✓ package.json read successfully");
             if let Ok(package_json) = serde_json::from_str::<serde_json::Value>(&package_content) {
                 println!("✓ package.json parsed successfully");
@@ -135,7 +169,7 @@ fn try_node_modules_resolution<'a>(
                     println!("Checking main file at: {}", main_path.display());
                     if main_path.exists() {
                         println!("✓ Main file exists, reading...");
-                        let content = fs::read_to_string(&main_path)?;
+                        let content = read_file_cached(&main_path)?;
                         println!("✓ Main file content read, executing...");
                         return execute_module_content(scope, &content);
                     } else {
@@ -158,13 +192,13 @@ fn try_node_modules_resolution<'a>(
     let index_path = node_modules_path.join("index.js");
     println!("Trying index.js at: {}", index_path.display());
     if index_path.exists() {
-        let content = fs::read_to_string(&index_path)?;
+        let content = read_file_cached(&index_path)?;
         return execute_module_content(scope, &content);
     }
 
     // Try direct file
     if node_modules_path.exists() && node_modules_path.is_file() {
-        let content = fs::read_to_string(&node_modules_path)?;
+        let content = read_file_cached(&node_modules_path)?;
         return execute_module_content(scope, &content);
     }
 
@@ -266,19 +300,19 @@ fn load_simple_module<'a>(
     };
 
     // Try the path as-is
-    if let Ok(content) = fs::read_to_string(&full_path) {
+    if let Ok(content) = read_file_cached(&full_path) {
         return execute_module_content(scope, &content);
     }
 
     // Try with .js extension
     let js_path = full_path.with_extension("js");
-    if let Ok(content) = fs::read_to_string(&js_path) {
+    if let Ok(content) = read_file_cached(&js_path) {
         return execute_module_content(scope, &content);
     }
 
     // Try with .json extension
     let json_path = full_path.with_extension("json");
-    if let Ok(content) = fs::read_to_string(&json_path) {
+    if let Ok(content) = read_file_cached(&json_path) {
         return parse_json_module(scope, &content);
     }
 
@@ -371,7 +405,7 @@ fn simple_read_file_sync(
     let path_string = path_arg.to_string(scope).unwrap();
     let path = path_string.to_rust_string_lossy(scope);
 
-    match fs::read_to_string(&path) {
+    match read_file_cached(&Path::new(&path)) {
         Ok(content) => {
             let result = v8::String::new(scope, &content).unwrap();
             rv.set(result.into());

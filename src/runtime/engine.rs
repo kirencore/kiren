@@ -37,8 +37,12 @@ impl Engine {
             v8::V8::initialize();
         });
 
-        // Create isolate with optimized settings for performance
-        let create_params = v8::CreateParams::default().heap_limits(0, 128 * 1024 * 1024); // Set reasonable heap limit (128MB)
+        // Create isolate with optimized settings for production
+        let heap_size = std::env::var("KIREN_HEAP_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(512); // Default 512MB
+        let create_params = v8::CreateParams::default().heap_limits(0, heap_size * 1024 * 1024);
         let mut isolate = v8::Isolate::new(create_params);
 
         // Performance optimizations
@@ -218,7 +222,7 @@ impl Engine {
     ) -> Result<String> {
         let scope = &mut v8::HandleScope::new(&mut self.isolate);
 
-        // Use cached context or create new one with API setup
+        // Use cached context for performance - setup APIs only once
         let context = if let Some(ref cached) = self.cached_context {
             v8::Local::new(scope, cached)
         } else {
