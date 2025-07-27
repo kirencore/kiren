@@ -1,6 +1,54 @@
 #![allow(dead_code)]
 use anyhow::Result;
+use std::sync::Mutex;
 use v8;
+
+// Global state to track current executing file stack
+static CURRENT_FILE_STACK: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
+
+pub fn set_current_file_path(path: std::path::PathBuf) {
+    if let Ok(mut stack) = CURRENT_FILE_STACK.lock() {
+        stack.clear();
+        stack.push(path);
+    }
+}
+
+pub fn push_current_file_path(path: std::path::PathBuf) {
+    if let Ok(mut stack) = CURRENT_FILE_STACK.lock() {
+        stack.push(path);
+    }
+}
+
+pub fn pop_current_file_path() -> Option<std::path::PathBuf> {
+    if let Ok(mut stack) = CURRENT_FILE_STACK.lock() {
+        stack.pop()
+    } else {
+        None
+    }
+}
+
+pub fn get_current_file_directory() -> std::path::PathBuf {
+    if let Ok(stack) = CURRENT_FILE_STACK.lock() {
+        if let Some(current_path) = stack.last() {
+            if let Some(parent) = current_path.parent() {
+                return parent.to_path_buf();
+            }
+        }
+    }
+    // Fallback to current directory
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+pub fn reset_context_to_main_file() {
+    if let Ok(mut stack) = CURRENT_FILE_STACK.lock() {
+        // Keep only the first (main) file in the stack
+        if !stack.is_empty() {
+            let main_file = stack[0].clone();
+            stack.clear();
+            stack.push(main_file);
+        }
+    }
+}
 
 // Simplified ES Modules support
 pub fn setup_es_modules(
@@ -111,9 +159,8 @@ fn dynamic_import(
             resolver.resolve(scope, http_module.into());
         }
         _ => {
-            // Try to load from filesystem
-            let base_path =
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            // Try to load from filesystem - use current executing file's directory as base
+            let base_path = get_current_file_directory();
             let module_path = resolve_module_path(&base_path, &specifier);
 
             match module_path.and_then(|path| std::fs::read_to_string(path).map_err(|e| e.into())) {

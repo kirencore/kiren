@@ -281,9 +281,34 @@ async fn execute_file(filename: &str) -> Result<()> {
 }
 
 fn extract_port_from_source(source: &str) -> u16 {
+    // Look for PORT environment variable usage
+    if source.contains("process.env.PORT") {
+        // Try to extract default port from || fallback
+        if let Some(or_pos) = source.find("process.env.PORT || ") {
+            let after_or = &source[or_pos + 20..];
+            if let Some(end) = after_or.find(|c: char| !c.is_ascii_digit()) {
+                let port_str = &after_or[..end];
+                if let Ok(port) = port_str.parse::<u16>() {
+                    return port;
+                }
+            }
+        }
+    }
+
     // Look for server.listen(port) patterns
     if let Some(listen_pos) = source.find("server.listen(") {
         let after_listen = &source[listen_pos + 14..];
+        if let Some(closing_paren) = after_listen.find(')') {
+            let port_str = after_listen[..closing_paren].trim();
+            if let Ok(port) = port_str.parse::<u16>() {
+                return port;
+            }
+        }
+    }
+
+    // Look for app.listen(port) patterns
+    if let Some(listen_pos) = source.find("app.listen(") {
+        let after_listen = &source[listen_pos + 11..];
         if let Some(closing_paren) = after_listen.find(')') {
             let port_str = after_listen[..closing_paren].trim();
             if let Ok(port) = port_str.parse::<u16>() {
@@ -396,6 +421,14 @@ async fn run_watch_mode_with_config(filename: &str, _config: &KirenConfig) -> Re
 }
 
 async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result<()> {
+    // Set current file path for module resolution - ensure it's absolute
+    let absolute_path = if std::path::Path::new(filename).is_absolute() {
+        std::path::PathBuf::from(filename)
+    } else {
+        std::env::current_dir()?.join(filename)
+    };
+    modules::es_modules_simple::set_current_file_path(absolute_path);
+    
     let source = fs::read_to_string(filename)?;
 
     // Check file extension to determine execution mode
@@ -456,12 +489,21 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
             }
 
             // Check if this is an HTTP server script
-            if source.contains("http.createServer") || source.contains("server.listen") {
+            if source.contains("http.createServer") || source.contains("server.listen") || source.contains("app.listen") {
                 let port = extract_port_from_source(&source);
                 println!("Starting HTTP server on port {}", port);
 
-                // Minimal startup delay for server binding
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                // Keep the server alive indefinitely for HTTP servers
+                println!("Press Ctrl+C to stop the server.");
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    // Process timer callbacks to keep the event loop alive
+                    if let Err(e) = engine.execute_with_callbacks("", true) {
+                        if !e.to_string().contains("Failed to compile") {
+                            eprintln!("Timer callback error: {}", e);
+                        }
+                    }
+                }
             } else {
                 println!("Script execution completed");
             }

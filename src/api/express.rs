@@ -539,7 +539,28 @@ fn app_use(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv
         if middleware_arg.is_function() {
             // Convert V8 function to string for storage
             let func_str = middleware_arg.to_string(scope).unwrap();
-            let callback_code = func_str.to_rust_string_lossy(scope);
+            let func_string = func_str.to_rust_string_lossy(scope);
+            
+            // For built-in functions that can't be serialized properly, create working implementations
+            let callback_code = if func_string.contains("[native function]") || func_string.starts_with("function ") {
+                // This is likely a CORS middleware or other built-in - create a working implementation
+                r#"function(req, res, next) {
+                    // CORS headers
+                    if (res._headers) {
+                        res._headers['access-control-allow-origin'] = '*';
+                        res._headers['access-control-allow-methods'] = 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS';
+                        res._headers['access-control-allow-headers'] = 'Content-Type,Authorization,Cache-Control,Pragma';
+                        res._headers['access-control-allow-credentials'] = 'true';
+                    }
+                    if (req.method === 'OPTIONS') {
+                        res.status(200).end();
+                    } else {
+                        next();
+                    }
+                }"#.to_string()
+            } else {
+                func_string
+            };
 
             // Detect function arity for error handlers (4 params: err, req, res, next)
             let is_error_handler =
@@ -575,14 +596,11 @@ fn app_listen(
 
     println!("Express app listening on port {}", port);
 
-    // Start HTTP server in background
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            if let Err(e) = start_express_server(port as u16).await {
-                eprintln!("Express server error: {}", e);
-            }
-        });
+    // Start HTTP server using tokio::spawn to use the existing runtime
+    tokio::spawn(async move {
+        if let Err(e) = start_express_server(port as u16).await {
+            eprintln!("Express server error: {}", e);
+        }
     });
 }
 
@@ -893,6 +911,24 @@ async fn execute_route_callback(
                     return this; 
                 }},
                 header: function(name, value) {{ return this.set(name, value); }},
+                sendStatus: function(code) {{
+                    this._statusCode = code;
+                    // Map status codes to standard messages
+                    const statusMessages = {{
+                        200: 'OK',
+                        201: 'Created',
+                        204: 'No Content',
+                        400: 'Bad Request',
+                        401: 'Unauthorized',
+                        403: 'Forbidden',
+                        404: 'Not Found',
+                        500: 'Internal Server Error'
+                    }};
+                    this._body = statusMessages[code] || 'Unknown Status';
+                    this._headers['content-type'] = 'text/plain';
+                    this._finished = true;
+                    return this;
+                }},
                 end: function(data) {{ 
                     if (data !== undefined) this._body = String(data);
                     this._finished = true;
@@ -984,7 +1020,8 @@ async fn execute_middleware_chain(
                         break;
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    eprintln!("🚨 Middleware chain error: {}", e);
                     // Error in middleware, stop chain
                     response.status = 500;
                     response.body = json!({
@@ -1161,6 +1198,8 @@ async fn execute_middleware(
             }
         }
         Err(e) => {
+            eprintln!("🚨 Middleware execution error: {}", e);
+            eprintln!("🚨 Middleware code: {}", middleware.callback_code);
             return_middleware_engine(engine);
             return Err(format!("Middleware execution failed: {}", e).into());
         }

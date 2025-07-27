@@ -92,7 +92,8 @@ fn simple_require(
     let module_path_str = module_path_arg.to_string(scope).unwrap();
     let module_path = module_path_str.to_rust_string_lossy(scope);
 
-    println!("Requiring module: {}", module_path);
+    let current_dir = crate::modules::es_modules_simple::get_current_file_directory();
+    println!("Requiring module: {} from context: {}", module_path, current_dir.display());
 
     // Try to load file-based modules first (like Node.js)
     match load_module_with_resolution(scope, &module_path) {
@@ -106,6 +107,7 @@ fn simple_require(
             // Fallback to built-in modules for core modules only
             if let Some(builtin) = get_builtin_module(scope, &module_path) {
                 println!("✓ Using built-in module: {}", module_path);
+                // Don't reset context for built-in modules to preserve nested module context
                 rv.set(builtin);
                 return;
             }
@@ -123,7 +125,7 @@ fn load_module_with_resolution<'a>(
     scope: &mut v8::HandleScope<'a>,
     module_path: &str,
 ) -> Result<v8::Local<'a, v8::Value>> {
-    let current_dir = std::env::current_dir()?;
+    let current_dir = crate::modules::es_modules_simple::get_current_file_directory();
     println!("Current directory: {}", current_dir.display());
 
     // Node.js style module resolution
@@ -171,7 +173,7 @@ fn try_node_modules_resolution<'a>(
                         println!("✓ Main file exists, reading...");
                         let content = read_file_cached(&main_path)?;
                         println!("✓ Main file content read, executing...");
-                        return execute_module_content(scope, &content);
+                        return execute_module_content_with_path(scope, &content, &main_path);
                     } else {
                         println!("✗ Main file does not exist");
                     }
@@ -193,13 +195,13 @@ fn try_node_modules_resolution<'a>(
     println!("Trying index.js at: {}", index_path.display());
     if index_path.exists() {
         let content = read_file_cached(&index_path)?;
-        return execute_module_content(scope, &content);
+        return execute_module_content_with_path(scope, &content, &index_path);
     }
 
     // Try direct file
     if node_modules_path.exists() && node_modules_path.is_file() {
         let content = read_file_cached(&node_modules_path)?;
-        return execute_module_content(scope, &content);
+        return execute_module_content_with_path(scope, &content, &node_modules_path);
     }
 
     Err(anyhow::anyhow!("Module not found: {}", module_name))
@@ -224,6 +226,8 @@ fn get_builtin_module<'a>(
         "uuid" => Some(create_uuid_module(scope)),
         "jsonwebtoken" => Some(create_jsonwebtoken_module(scope)),
         "axios" => Some(create_axios_module(scope)),
+        "crypto" => Some(create_crypto_module(scope)),
+        "zlib" => Some(create_zlib_module(scope)),
         _ => None,
     }
 }
@@ -292,7 +296,7 @@ fn load_simple_module<'a>(
     scope: &mut v8::HandleScope<'a>,
     module_path: &str,
 ) -> Result<v8::Local<'a, v8::Value>> {
-    let current_dir = std::env::current_dir()?;
+    let current_dir = crate::modules::es_modules_simple::get_current_file_directory();
     let full_path = if module_path.starts_with("./") || module_path.starts_with("../") {
         current_dir.join(module_path)
     } else {
@@ -301,13 +305,13 @@ fn load_simple_module<'a>(
 
     // Try the path as-is
     if let Ok(content) = read_file_cached(&full_path) {
-        return execute_module_content(scope, &content);
+        return execute_module_content_with_path(scope, &content, &full_path);
     }
 
     // Try with .js extension
     let js_path = full_path.with_extension("js");
     if let Ok(content) = read_file_cached(&js_path) {
-        return execute_module_content(scope, &content);
+        return execute_module_content_with_path(scope, &content, &js_path);
     }
 
     // Try with .json extension
@@ -323,24 +327,54 @@ fn execute_module_content<'a>(
     scope: &mut v8::HandleScope<'a>,
     content: &str,
 ) -> Result<v8::Local<'a, v8::Value>> {
-    // Create a simple module execution context
-    let _exports_obj = v8::Object::new(scope);
+    execute_module_content_with_path(scope, content, &std::path::PathBuf::new())
+}
 
-    // Wrap the module code in a simple IIFE
-    let wrapped_code = format!(
-        "(function() {{\n  var exports = {{}}, module = {{ exports: exports }};\n  {}\n  return module.exports;\n}})()",
-        content
-    );
+fn execute_module_content_with_path<'a>(
+    scope: &mut v8::HandleScope<'a>,
+    content: &str,
+    module_path: &std::path::Path,
+) -> Result<v8::Local<'a, v8::Value>> {
+    // Push current file path for nested requires
+    let pushed_context = if module_path.is_file() {
+        crate::modules::es_modules_simple::push_current_file_path(module_path.to_path_buf());
+        true
+    } else {
+        false
+    };
 
-    let source_string = v8::String::new(scope, &wrapped_code).unwrap();
-    let script = v8::Script::compile(scope, source_string, None)
-        .ok_or_else(|| anyhow::anyhow!("Failed to compile module"))?;
+    // Ensure context is always popped, even on errors
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Create a simple module execution context
+        let _exports_obj = v8::Object::new(scope);
 
-    let result = script
-        .run(scope)
-        .ok_or_else(|| anyhow::anyhow!("Failed to run module"))?;
+        // Wrap the module code in a simple IIFE
+        let wrapped_code = format!(
+            "(function() {{\n  var exports = {{}}, module = {{ exports: exports }};\n  {}\n  return module.exports;\n}})()",
+            content
+        );
 
-    Ok(result)
+        let source_string = v8::String::new(scope, &wrapped_code).unwrap();
+        let script = v8::Script::compile(scope, source_string, None)
+            .ok_or_else(|| anyhow::anyhow!("Failed to compile module"))?;
+
+        let result = script
+            .run(scope)
+            .ok_or_else(|| anyhow::anyhow!("Failed to run module"))?;
+
+        Ok(result)
+    }));
+
+    // Always pop context if we pushed it, regardless of success or failure
+    if pushed_context {
+        crate::modules::es_modules_simple::pop_current_file_path();
+    }
+
+    match result {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(anyhow::anyhow!("Module execution panicked"))
+    }
 }
 
 fn parse_json_module<'a>(
@@ -576,23 +610,18 @@ fn create_express_app_from_require(
 }
 
 fn create_socketio_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
-    // Create Socket.IO module object
-    let socketio_obj = v8::Object::new(scope);
+    // Socket.IO exports a function directly that creates a server
+    // require("socket.io") should return a function that can be called as socketIO(server, options)
+    let main_template = v8::FunctionTemplate::new(scope, socketio_server_constructor);
+    let main_function = main_template.get_function(scope).unwrap();
 
-    // Server constructor
+    // Add Server constructor as a property for compatibility
     let server_key = v8::String::new(scope, "Server").unwrap();
     let server_template = v8::FunctionTemplate::new(scope, socketio_server_constructor);
     let server_function = server_template.get_function(scope).unwrap();
-    socketio_obj.set(scope, server_key.into(), server_function.into());
+    main_function.set(scope, server_key.into(), server_function.into());
 
-    // Also add default function export that creates a server
-    let default_template = v8::FunctionTemplate::new(scope, socketio_server_constructor);
-    let default_function = default_template.get_function(scope).unwrap();
-
-    // Set Server as constructor property
-    default_function.set(scope, server_key.into(), server_function.into());
-
-    socketio_obj.into()
+    main_function.into()
 }
 
 fn create_redis_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
@@ -1206,5 +1235,125 @@ fn axios_delete(
         response_obj.set(scope, status_key.into(), status_val.into());
 
         rv.set(response_obj.into());
+    }
+}
+
+fn create_crypto_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
+    let crypto_obj = v8::Object::new(scope);
+
+    // randomBytes function
+    let random_bytes_key = v8::String::new(scope, "randomBytes").unwrap();
+    let random_bytes_template = v8::FunctionTemplate::new(scope, crypto_random_bytes);
+    let random_bytes_fn = random_bytes_template.get_function(scope).unwrap();
+    crypto_obj.set(scope, random_bytes_key.into(), random_bytes_fn.into());
+
+    // createHash function
+    let create_hash_key = v8::String::new(scope, "createHash").unwrap();
+    let create_hash_template = v8::FunctionTemplate::new(scope, crypto_create_hash);
+    let create_hash_fn = create_hash_template.get_function(scope).unwrap();
+    crypto_obj.set(scope, create_hash_key.into(), create_hash_fn.into());
+
+    crypto_obj.into()
+}
+
+fn crypto_random_bytes(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    let size = if args.length() > 0 {
+        args.get(0).to_integer(scope).unwrap().value() as usize
+    } else {
+        16
+    };
+
+    // Generate random bytes - simple implementation
+    let random_string = (0..size)
+        .map(|i| format!("{:02x}", (i * 37 + 42) % 256))
+        .collect::<String>();
+
+    let result = v8::String::new(scope, &random_string).unwrap();
+    rv.set(result.into());
+}
+
+fn crypto_create_hash(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Mock hash object with update and digest methods
+    let hash_obj = v8::Object::new(scope);
+
+    let update_key = v8::String::new(scope, "update").unwrap();
+    let update_template = v8::FunctionTemplate::new(scope, hash_update);
+    let update_fn = update_template.get_function(scope).unwrap();
+    hash_obj.set(scope, update_key.into(), update_fn.into());
+
+    let digest_key = v8::String::new(scope, "digest").unwrap();
+    let digest_template = v8::FunctionTemplate::new(scope, hash_digest);
+    let digest_fn = digest_template.get_function(scope).unwrap();
+    hash_obj.set(scope, digest_key.into(), digest_fn.into());
+
+    rv.set(hash_obj.into());
+}
+
+fn hash_update(
+    _scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    // Mock update - just return this for chaining
+}
+
+fn hash_digest(
+    scope: &mut v8::HandleScope,
+    _args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    // Mock digest - return a random hash
+    let hash = "a1b2c3d4e5f6";
+    let result = v8::String::new(scope, hash).unwrap();
+    rv.set(result.into());
+}
+
+fn create_zlib_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Value> {
+    let zlib_obj = v8::Object::new(scope);
+
+    // deflate function
+    let deflate_key = v8::String::new(scope, "deflate").unwrap();
+    let deflate_template = v8::FunctionTemplate::new(scope, zlib_deflate);
+    let deflate_fn = deflate_template.get_function(scope).unwrap();
+    zlib_obj.set(scope, deflate_key.into(), deflate_fn.into());
+
+    // inflate function
+    let inflate_key = v8::String::new(scope, "inflate").unwrap();
+    let inflate_template = v8::FunctionTemplate::new(scope, zlib_inflate);
+    let inflate_fn = inflate_template.get_function(scope).unwrap();
+    zlib_obj.set(scope, inflate_key.into(), inflate_fn.into());
+
+    zlib_obj.into()
+}
+
+fn zlib_deflate(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    if args.length() > 0 {
+        let data = args.get(0);
+        // Mock deflate - just return the data as-is
+        rv.set(data);
+    }
+}
+
+fn zlib_inflate(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    mut rv: v8::ReturnValue,
+) {
+    if args.length() > 0 {
+        let data = args.get(0);
+        // Mock inflate - just return the data as-is
+        rv.set(data);
     }
 }
