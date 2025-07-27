@@ -540,9 +540,11 @@ fn app_use(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv
             // Convert V8 function to string for storage
             let func_str = middleware_arg.to_string(scope).unwrap();
             let func_string = func_str.to_rust_string_lossy(scope);
-            
+
             // For built-in functions that can't be serialized properly, create working implementations
-            let callback_code = if func_string.contains("[native function]") || func_string.starts_with("function ") {
+            let callback_code = if func_string.contains("[native function]")
+                || func_string.starts_with("function ")
+            {
                 // This is likely a CORS middleware or other built-in - create a working implementation
                 r#"function(req, res, next) {
                     // CORS headers

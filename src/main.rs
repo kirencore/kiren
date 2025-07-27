@@ -428,7 +428,7 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
         std::env::current_dir()?.join(filename)
     };
     modules::es_modules_simple::set_current_file_path(absolute_path);
-    
+
     let source = fs::read_to_string(filename)?;
 
     // Check file extension to determine execution mode
@@ -489,7 +489,10 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
             }
 
             // Check if this is an HTTP server script
-            if source.contains("http.createServer") || source.contains("server.listen") || source.contains("app.listen") {
+            if source.contains("http.createServer")
+                || source.contains("server.listen")
+                || source.contains("app.listen")
+            {
                 let port = extract_port_from_source(&source);
                 println!("Starting HTTP server on port {}", port);
 

@@ -93,7 +93,11 @@ fn simple_require(
     let module_path = module_path_str.to_rust_string_lossy(scope);
 
     let current_dir = crate::modules::es_modules_simple::get_current_file_directory();
-    println!("Requiring module: {} from context: {}", module_path, current_dir.display());
+    println!(
+        "Requiring module: {} from context: {}",
+        module_path,
+        current_dir.display()
+    );
 
     // Try to load file-based modules first (like Node.js)
     match load_module_with_resolution(scope, &module_path) {
@@ -373,7 +377,7 @@ fn execute_module_content_with_path<'a>(
     match result {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(anyhow::anyhow!("Module execution panicked"))
+        Err(_) => Err(anyhow::anyhow!("Module execution panicked")),
     }
 }
 

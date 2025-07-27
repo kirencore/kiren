@@ -115,8 +115,10 @@ impl Engine {
 
     pub fn execute_module(&mut self, source: &str, module_name: &str) -> Result<String> {
         // Set current file path for module resolution
-        crate::modules::es_modules_simple::set_current_file_path(std::path::PathBuf::from(module_name));
-        
+        crate::modules::es_modules_simple::set_current_file_path(std::path::PathBuf::from(
+            module_name,
+        ));
+
         // Check cache first for performance
         {
             let cache = MODULE_CACHE.lock().unwrap();
