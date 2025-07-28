@@ -1,10 +1,12 @@
 # Multi-stage build for optimal size
-FROM rust:1.75-slim as builder
+FROM rust:1.82-slim as builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
