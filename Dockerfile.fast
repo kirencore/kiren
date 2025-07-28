@@ -1,19 +1,4 @@
-# Multi-stage build for optimal size
-FROM rust:1.75-slim as builder
-
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY . .
-
-# Build release binary
-RUN cargo build --release
-
-# Runtime stage
+# Fast build - uses local binary
 FROM debian:bookworm-slim
 
 # Install runtime dependencies
@@ -22,8 +7,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder stage
-COPY --from=builder /app/target/release/kiren /usr/local/bin/kiren
+# Copy pre-built binary (build locally first)
+COPY target/release/kiren /usr/local/bin/kiren
 
 # Create app user
 RUN groupadd -r app && useradd -r -g app app
