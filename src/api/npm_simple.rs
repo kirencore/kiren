@@ -327,6 +327,7 @@ fn load_simple_module<'a>(
     Err(anyhow::anyhow!("Module not found: {}", module_path))
 }
 
+#[allow(dead_code)]
 fn execute_module_content<'a>(
     scope: &mut v8::HandleScope<'a>,
     content: &str,
@@ -607,7 +608,7 @@ fn create_express_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v
 fn create_express_app_from_require(
     scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
-    mut rv: v8::ReturnValue,
+    rv: v8::ReturnValue,
 ) {
     // This is equivalent to calling the original create_express_app
     crate::api::express::create_express_app(scope, args, rv);
@@ -1339,7 +1340,7 @@ fn create_zlib_module<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::
 }
 
 fn zlib_deflate(
-    scope: &mut v8::HandleScope,
+    _scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
@@ -1351,7 +1352,7 @@ fn zlib_deflate(
 }
 
 fn zlib_inflate(
-    scope: &mut v8::HandleScope,
+    _scope: &mut v8::HandleScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {

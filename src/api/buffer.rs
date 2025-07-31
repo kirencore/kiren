@@ -474,7 +474,7 @@ fn buffer_slice(
             buffer.length()
         };
 
-        let slice_length = if end > start { end - start } else { 0 };
+        let slice_length = end.saturating_sub(start);
         let array_buffer = v8::ArrayBuffer::new(scope, slice_length);
 
         let dest_backing_store = array_buffer.get_backing_store();

@@ -29,7 +29,7 @@ name = "kiren_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tokio = { version = "1.0", features = ["macros", "rt", "time", "sync"], default-features = false, optional = true }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "time", "sync", "signal", "fs"], default-features = false, optional = true }
 clap = { version = "4.0", features = ["derive"], optional = true }
 anyhow = "1.0"
 v8 = { version = "0.84", optional = true }
