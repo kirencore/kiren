@@ -71,6 +71,18 @@ pub fn setup_http(scope: &mut v8::HandleScope, context: v8::Local<v8::Context>) 
     let create_server_fn = create_server_tmpl.get_function(scope).unwrap();
     http_obj.set(scope, create_server_key.into(), create_server_fn.into());
 
+    // get method on http module
+    let get_key = v8::String::new(scope, "get").unwrap();
+    let get_tmpl = v8::FunctionTemplate::new(scope, http_get);
+    let get_fn = get_tmpl.get_function(scope).unwrap();
+    http_obj.set(scope, get_key.into(), get_fn.into());
+
+    // post method on http module
+    let post_key = v8::String::new(scope, "post").unwrap();
+    let post_tmpl = v8::FunctionTemplate::new(scope, http_post);
+    let post_fn = post_tmpl.get_function(scope).unwrap();
+    http_obj.set(scope, post_key.into(), post_fn.into());
+
     global.set(scope, http_key.into(), http_obj.into());
 
     Ok(())
@@ -278,7 +290,13 @@ fn server_delete(
 }
 
 async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) -> Result<()> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    // Bind to 0.0.0.0 in Docker environment, 127.0.0.1 otherwise
+    let bind_addr = if std::env::var("DOCKER_ENV").is_ok() || std::env::var("CONTAINER").is_ok() {
+        [0, 0, 0, 0]
+    } else {
+        [127, 0, 0, 1]
+    };
+    let addr = SocketAddr::from((bind_addr, port));
 
     let make_svc = make_service_fn(|_conn| async {
         Ok::<_, Infallible>(service_fn(handle_request_with_timeout))
@@ -292,7 +310,8 @@ async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) 
         .tcp_keepalive(Some(Duration::from_secs(60))) // TCP keep-alive
         .serve(make_svc);
 
-    eprintln!("🚀 HTTP server listening on http://127.0.0.1:{}", port);
+    let bind_ip = if bind_addr == [0, 0, 0, 0] { "0.0.0.0" } else { "127.0.0.1" };
+    eprintln!("🚀 HTTP server listening on http://{}:{}", bind_ip, port);
     eprintln!("✅ Enhanced connection handling enabled (keep-alive, timeouts, security)");
 
     // Graceful shutdown with broadcast receiver
@@ -468,4 +487,22 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
     };
 
     Ok(add_security_headers(response))
+}
+
+// http.get function
+pub fn http_get(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    register_route(scope, args, "GET");
+}
+
+// http.post function
+pub fn http_post(
+    scope: &mut v8::HandleScope,
+    args: v8::FunctionCallbackArguments,
+    _rv: v8::ReturnValue,
+) {
+    register_route(scope, args, "POST");
 }

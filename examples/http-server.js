@@ -1,26 +1,10 @@
-console.log("🚀 Starting Kiren HTTP Server...");
+const http = require("http");
 
-// Create HTTP server
-const server = http.createServer();
-
-// Register routes
-server.get("/", (req, res) => {
-    console.log("GET / called");
-    return "Hello from Kiren!";
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Hello from Kiren HTTP Server\!");
 });
 
-server.get("/api/users", (req, res) => {
-    console.log("GET /api/users called");
-    return { users: ["Alice", "Bob", "Charlie"] };
+server.listen(3000, () => {
+  console.log("Server running on http://localhost:3000");
 });
-
-server.post("/api/data", (req, res) => {
-    console.log("POST /api/data called");
-    return { message: "Data received" };
-});
-
-// Start server
-console.log("Starting server on port 3000...");
-server.listen(3000);
-
-console.log("🎉 Server ready! Visit http://localhost:3000");
