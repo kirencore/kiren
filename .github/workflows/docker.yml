@@ -57,7 +57,7 @@ jobs:
         docker run --rm -d -p 3000:3000 --name kiren-test ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest kiren examples/simple-server.js
         
         # Wait for server to start
-        sleep 5
+        sleep 10
         
         # Test server response
         curl -f http://localhost:3000/ || exit 1
