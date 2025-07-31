@@ -16,6 +16,7 @@ mod typescript;
 use api::console;
 use config::KirenConfig;
 use runtime::engine::Engine;
+use typescript::transpile_file_if_typescript;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -429,11 +430,24 @@ async fn execute_file_with_engine(filename: &str, engine: &mut Engine) -> Result
     };
     modules::es_modules_simple::set_current_file_path(absolute_path);
 
-    let source = fs::read_to_string(filename)?;
+    // Handle TypeScript files by transpiling them first
+    let source = if filename.ends_with(".ts") || filename.ends_with(".tsx") {
+        match transpile_file_if_typescript(filename) {
+            Ok(js_source) => js_source,
+            Err(e) => {
+                eprintln!("TypeScript transpilation failed: {}", e);
+                return Err(e);
+            }
+        }
+    } else {
+        fs::read_to_string(filename)?
+    };
 
     // Check file extension to determine execution mode
     let is_module = filename.ends_with(".mjs")
         || filename.ends_with(".esm.js")
+        || filename.ends_with(".ts")
+        || filename.ends_with(".tsx")
         || source.contains("import ")
         || source.contains("export ");
 

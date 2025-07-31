@@ -6,10 +6,13 @@ mod tests;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
+use swc_common::{errors::Handler, sync::Lrc, SourceMap};
+use swc_ts_fast_strip::{operate, Options};
 
-/// TypeScript to JavaScript transpiler (simplified)
+/// TypeScript to JavaScript transpiler using SWC
 pub struct TypeScriptTranspiler {
-    // Precompiled regex patterns for performance
+    source_map: Lrc<SourceMap>,
+    // Keep regex patterns for fallback compatibility
     type_annotations: Regex,
     interfaces: Regex,
     import_types: Regex,
@@ -22,7 +25,10 @@ pub struct TypeScriptTranspiler {
 
 impl TypeScriptTranspiler {
     pub fn new() -> Self {
+        let source_map = Lrc::new(SourceMap::default());
+
         Self {
+            source_map,
             // Remove type annotations: : Type (but not in comments)
             type_annotations: Regex::new(
                 r"(?m)^(\s*)([^/\n]*?):\s*[A-Za-z_][A-Za-z0-9_\[\]<>|\s]*(\s*[,=){};\n])",
@@ -57,8 +63,43 @@ impl TypeScriptTranspiler {
         }
     }
 
-    /// Transpile TypeScript code to JavaScript
+    /// Transpile TypeScript code to JavaScript using SWC
     pub fn transpile(&self, typescript_code: &str) -> Result<String> {
+        // Try SWC first for better performance and accuracy
+        match self.transpile_with_swc(typescript_code) {
+            Ok(js_code) => Ok(js_code),
+            Err(_) => {
+                // Fall back to regex-based transpilation if SWC fails
+                self.transpile_with_regex(typescript_code)
+            }
+        }
+    }
+
+    /// Transpile using SWC for better performance and accuracy
+    fn transpile_with_swc(&self, typescript_code: &str) -> Result<String> {
+        let handler = Handler::with_emitter_writer(
+            Box::new(std::io::stderr()),
+            Some(self.source_map.clone()),
+        );
+
+        let options = Options::default();
+
+        // Use the handler with HANDLER context
+        swc_common::errors::HANDLER.set(&handler, || {
+            match operate(
+                &self.source_map,
+                &handler,
+                typescript_code.to_string(),
+                options,
+            ) {
+                Ok(result) => Ok(result.code),
+                Err(e) => Err(anyhow!("SWC transpilation failed: {:?}", e)),
+            }
+        })
+    }
+
+    /// Original regex-based transpilation as fallback
+    fn transpile_with_regex(&self, typescript_code: &str) -> Result<String> {
         let mut js_code = typescript_code.to_string();
 
         // Remove type-only imports first
@@ -179,6 +220,21 @@ impl TypeScriptTranspiler {
 
     /// Enhanced transpilation with NestJS decorator support
     pub fn transpile_nestjs(&self, typescript_code: &str) -> Result<String> {
+        // Try SWC first, fall back to regex-based approach
+        match self.transpile_with_swc(typescript_code) {
+            Ok(js_code) => {
+                // Post-process for NestJS decorators if needed
+                Ok(self.convert_nestjs_decorators(&js_code))
+            }
+            Err(_) => {
+                // Use regex-based approach with NestJS support
+                self.transpile_nestjs_with_regex(typescript_code)
+            }
+        }
+    }
+
+    /// NestJS transpilation using regex (fallback)
+    fn transpile_nestjs_with_regex(&self, typescript_code: &str) -> Result<String> {
         let mut js_code = typescript_code.to_string();
 
         // Convert common NestJS decorators to function calls FIRST

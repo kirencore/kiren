@@ -54,6 +54,8 @@ hex = "0.4"
 lazy_static = "1.4"
 sha2 = "0.10"
 md5 = "0.7"
+swc_common = "14.0"
+swc_ts_fast_strip = "28.0"
 
 # WebAssembly dependencies (optional for WASM target only)
 wasm-bindgen = { version = "0.2", optional = true }
