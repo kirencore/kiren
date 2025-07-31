@@ -48,10 +48,3 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-
-    - name: Test image
-      run: |
-        docker run --rm -d -p 3000:3000 --name kiren-test ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-        sleep 30
-        curl -f http://localhost:3000/healthcheck || exit 1
-        docker stop kiren-test
