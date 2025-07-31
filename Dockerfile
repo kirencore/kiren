@@ -26,11 +26,15 @@ RUN apt-get update && apt-get install -y \
 # Copy binary from builder stage
 COPY --from=builder /app/target/release/kiren /usr/local/bin/kiren
 
+# Copy test server
+COPY --from=builder /app/test-server.js /app/test-server.js
+
 # Create app user
 RUN groupadd -r app && useradd -r -g app app
+RUN chown -R app:app /app
 USER app
 
 WORKDIR /app
 
-# Default command shows help
-CMD ["kiren", "--help"]
+# Default command runs test server
+CMD ["kiren", "test-server.js"]

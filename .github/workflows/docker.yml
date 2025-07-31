@@ -50,3 +50,17 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
+    - name: Test Docker image
+      if: github.event_name != 'pull_request'
+      run: |
+        # Start container (runs test-server.js by default)
+        docker run --rm -d -p 3000:3000 --name kiren-test ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        
+        # Wait for server to start
+        sleep 10
+        
+        # Test server response
+        curl -f http://localhost:3000/ || exit 1
+        
+        # Stop container
+        docker stop kiren-test
