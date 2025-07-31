@@ -24,39 +24,74 @@ exclude = [
 name = "kiren"
 path = "src/main.rs"
 
+[lib]
+name = "kiren_wasm"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
-tokio = { version = "1.0", features = ["full"] }
-clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["macros", "rt", "time", "sync"], default-features = false, optional = true }
+clap = { version = "4.0", features = ["derive"], optional = true }
 anyhow = "1.0"
-v8 = "0.84"
-uuid = { version = "1.0", features = ["v4"] }
+v8 = { version = "0.84", optional = true }
+uuid = { version = "1.0", features = ["v4", "js"] }
 once_cell = "1.0"
 dashmap = "5.0"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json"], optional = true }
 serde_json = "1.0"
-hyper = { version = "0.14", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec"] }
+hyper = { version = "0.14", features = ["full"], optional = true }
+tokio-util = { version = "0.7", features = ["codec"], optional = true }
 regex = "1.0"
 crossbeam-channel = "0.5"
-notify = "6.0"
+notify = { version = "6.0", optional = true }
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
-dirs = "5.0"
+dirs = { version = "5.0", optional = true }
 rand = "0.8"
 urlencoding = "2.1"
-ada-url = "2.0"
+ada-url = { version = "2.0", optional = true }
 base64 = "0.21"
 hex = "0.4"
 lazy_static = "1.4"
 sha2 = "0.10"
 md5 = "0.7"
 
+# WebAssembly dependencies (optional for WASM target only)
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+  "console",
+  "Performance",
+  "Window",
+  "Document",
+  "Response",
+  "Request",
+  "Headers",
+  "TextEncoder",
+  "TextDecoder",
+] }
+console_error_panic_hook = { version = "0.1", optional = true }
+getrandom = { version = "0.2", optional = true, features = ["js"] }
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.0"
+wasm-bindgen-test = "0.3"
 
 [profile.release]
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# WebAssembly optimizations
+[profile.release.package."*"]
+opt-level = "s"
+
+[features]
+default = ["cli"]
+cli = ["clap", "v8", "hyper", "reqwest", "tokio-util", "notify", "dirs", "ada-url", "tokio"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "console_error_panic_hook", "getrandom/js"]
+
+[package.metadata.wasm-pack]
+wasm-opt = false
