@@ -32,29 +32,31 @@ impl WasmEngine {
     /// Execute JavaScript code synchronously in browser context
     pub fn execute(&mut self, code: &str) -> Result<String> {
         let mut output = Vec::new();
-        
+
         // Parse and execute JavaScript using browser's built-in eval
         let result = self.execute_in_browser_context(code, &mut output)?;
-        
+
         // Capture console output
         if let Ok(mut buffer) = self.console_buffer.lock() {
             buffer.extend(output);
         }
-        
+
         Ok(result)
     }
 
     /// Execute JavaScript code asynchronously
     pub async fn execute_async(&mut self, code: &str) -> Result<String> {
         let mut output = Vec::new();
-        
+
         // For async execution, we need to handle promises
-        let result = self.execute_async_in_browser_context(code, &mut output).await?;
-        
+        let result = self
+            .execute_async_in_browser_context(code, &mut output)
+            .await?;
+
         if let Ok(mut buffer) = self.console_buffer.lock() {
             buffer.extend(output);
         }
-        
+
         Ok(result)
     }
 
@@ -64,7 +66,7 @@ impl WasmEngine {
         if let Ok(mut modules) = self.modules.lock() {
             modules.insert(module_url.to_string(), code.to_string());
         }
-        
+
         // Execute as module with import/export support
         let wrapped_code = self.wrap_as_module(code, module_url)?;
         self.execute(&wrapped_code)
@@ -74,25 +76,16 @@ impl WasmEngine {
     pub fn heap_usage(&self) -> u32 {
         // In WASM, we can't directly access V8 heap info
         // Return approximation based on our data structures
-        let buffer_size = self.console_buffer
-            .lock()
-            .map(|b| b.len())
-            .unwrap_or(0);
-            
-        let modules_size = self.modules
-            .lock()
-            .map(|m| m.len())
-            .unwrap_or(0);
-            
+        let buffer_size = self.console_buffer.lock().map(|b| b.len()).unwrap_or(0);
+
+        let modules_size = self.modules.lock().map(|m| m.len()).unwrap_or(0);
+
         (buffer_size + modules_size) as u32 * 100 // Rough estimate
     }
 
     /// Get number of loaded modules
     pub fn modules_count(&self) -> u32 {
-        self.modules
-            .lock()
-            .map(|m| m.len())
-            .unwrap_or(0) as u32
+        self.modules.lock().map(|m| m.len()).unwrap_or(0) as u32
     }
 
     /// Clear runtime state
@@ -100,15 +93,15 @@ impl WasmEngine {
         if let Ok(mut buffer) = self.console_buffer.lock() {
             buffer.clear();
         }
-        
+
         if let Ok(mut modules) = self.modules.lock() {
             modules.clear();
         }
-        
+
         if let Ok(mut globals) = self.globals.lock() {
             globals.clear();
         }
-        
+
         Ok(())
     }
 
@@ -124,7 +117,7 @@ impl WasmEngine {
     fn execute_in_browser_context(&self, code: &str, output: &mut Vec<String>) -> Result<String> {
         // Create a safe execution context with Kiren APIs
         let enhanced_code = self.wrap_with_kiren_apis(code);
-        
+
         // Use Function constructor for safer eval alternative
         let js_code = format!(
             r#"
@@ -181,22 +174,30 @@ impl WasmEngine {
                         .as_string()
                         .unwrap_or("undefined".to_string())
                 });
-                
+
                 Ok(result_str)
             }
             Err(error) => {
-                let error_msg = error.as_string()
+                let error_msg = error
+                    .as_string()
                     .unwrap_or_else(|| "Unknown JavaScript error".to_string());
                 output.push(format!("Error: {}", error_msg));
-                Err(anyhow::anyhow!("JavaScript execution failed: {}", error_msg))
+                Err(anyhow::anyhow!(
+                    "JavaScript execution failed: {}",
+                    error_msg
+                ))
             }
         }
     }
 
     /// Execute JavaScript asynchronously in browser context
-    async fn execute_async_in_browser_context(&self, code: &str, output: &mut Vec<String>) -> Result<String> {
+    async fn execute_async_in_browser_context(
+        &self,
+        code: &str,
+        output: &mut Vec<String>,
+    ) -> Result<String> {
         let enhanced_code = self.wrap_with_kiren_apis(code);
-        
+
         let js_code = format!(
             r#"
             (async function() {{
@@ -229,7 +230,7 @@ impl WasmEngine {
 
         let promise = js_sys::Function::new_no_args(&js_code).call0(&JsValue::NULL)?;
         let future = JsFuture::from(js_sys::Promise::from(promise));
-        
+
         match future.await {
             Ok(result) => {
                 let result_str = result.as_string().unwrap_or_else(|| {
@@ -238,11 +239,12 @@ impl WasmEngine {
                         .as_string()
                         .unwrap_or("undefined".to_string())
                 });
-                
+
                 Ok(result_str)
             }
             Err(error) => {
-                let error_msg = error.as_string()
+                let error_msg = error
+                    .as_string()
                     .unwrap_or_else(|| "Unknown async error".to_string());
                 output.push(format!("Async Error: {}", error_msg));
                 Err(anyhow::anyhow!("Async execution failed: {}", error_msg))
@@ -325,10 +327,9 @@ impl WasmEngine {
                 return module.exports;
             }})()
             "#,
-            module_url,
-            code
+            module_url, code
         );
-        
+
         Ok(wrapped)
     }
 }

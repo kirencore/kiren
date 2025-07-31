@@ -18,9 +18,7 @@ impl KirenRuntime {
     #[wasm_bindgen(constructor)]
     pub fn new() -> KirenRuntime {
         web_sys::console::log_1(&"🦀 Kiren WASM Runtime initializing...".into());
-        KirenRuntime {
-            initialized: true,
-        }
+        KirenRuntime { initialized: true }
     }
 
     /// Execute JavaScript code synchronously - Ultra safe version with console capture
@@ -82,7 +80,7 @@ impl KirenRuntime {
             code
         );
 
-        // Safe async execution 
+        // Safe async execution
         match js_sys::eval(&wrapper_code) {
             Ok(promise) => {
                 // Check if it's a promise (async code)
@@ -94,10 +92,8 @@ impl KirenRuntime {
                 } else {
                     Ok("undefined".to_string())
                 }
-            },
-            Err(_) => {
-                Ok("execution error".to_string())
             }
+            Err(_) => Ok("execution error".to_string()),
         }
     }
 
@@ -205,10 +201,8 @@ impl KirenRuntime {
                                 } else {
                                     Ok(JsValue::from_str("undefined"))
                                 }
-                            },
-                            Err(e) => {
-                                Ok(JsValue::from_str(&format!("Async error: {:?}", e)))
                             }
+                            Err(e) => Ok(JsValue::from_str(&format!("Async error: {:?}", e))),
                         }
                     } else {
                         // Sync result
@@ -218,10 +212,8 @@ impl KirenRuntime {
                             Ok(JsValue::from_str("undefined"))
                         }
                     }
-                },
-                Err(_) => {
-                    Ok(JsValue::from_str("execution error"))
                 }
+                Err(_) => Ok(JsValue::from_str("execution error")),
             }
         })
     }
@@ -241,7 +233,8 @@ impl KirenRuntime {
     /// Get runtime statistics - Safe version
     #[wasm_bindgen]
     pub fn stats(&self) -> String {
-        "{\"version\":\"3.0.0-wasm\",\"initialized\":true,\"heap_used\":1024,\"modules_loaded\":0}".to_string()
+        "{\"version\":\"3.0.0-wasm\",\"initialized\":true,\"heap_used\":1024,\"modules_loaded\":0}"
+            .to_string()
     }
 
     /// Clear runtime state
@@ -284,28 +277,27 @@ pub fn supports_async() -> bool {
 
 #[wasm_bindgen]
 pub fn supports_fetch() -> bool {
-    js_sys::Reflect::has(&js_sys::global(), &JsValue::from_str("fetch"))
-        .unwrap_or(false)
+    js_sys::Reflect::has(&js_sys::global(), &JsValue::from_str("fetch")).unwrap_or(false)
 }
 
 // Benchmark execution function - Safe version
 #[wasm_bindgen]
 pub fn benchmark_execution(code: &str, iterations: u32) -> js_sys::Promise {
     let code = code.to_string();
-    
+
     wasm_bindgen_futures::future_to_promise(async move {
         let window = web_sys::window().ok_or("No window")?;
         let performance = window.performance().ok_or("No performance")?;
-        
+
         let start = performance.now();
-        
+
         for _ in 0..iterations {
             let _ = js_sys::eval(&code);
         }
-        
+
         let end = performance.now();
         let total_time = end - start;
-        
+
         // Simple result object as string
         let result = format!(
             "{{\"iterations\":{},\"total_time_ms\":{:.2},\"avg_time_ms\":{:.2},\"ops_per_second\":{:.2}}}",
@@ -314,7 +306,7 @@ pub fn benchmark_execution(code: &str, iterations: u32) -> js_sys::Promise {
             total_time / iterations as f64,
             (iterations as f64 * 1000.0) / total_time
         );
-        
+
         Ok(JsValue::from_str(&result))
     })
 }
