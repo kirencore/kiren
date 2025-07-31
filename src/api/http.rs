@@ -290,13 +290,7 @@ fn server_delete(
 }
 
 async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) -> Result<()> {
-    // Bind to 0.0.0.0 in Docker environment, 127.0.0.1 otherwise
-    let bind_addr = if std::env::var("DOCKER_ENV").is_ok() || std::env::var("CONTAINER").is_ok() {
-        [0, 0, 0, 0]
-    } else {
-        [127, 0, 0, 1]
-    };
-    let addr = SocketAddr::from((bind_addr, port));
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
     let make_svc = make_service_fn(|_conn| async {
         Ok::<_, Infallible>(service_fn(handle_request_with_timeout))
@@ -310,12 +304,7 @@ async fn start_http_server(port: u16, mut shutdown_rx: broadcast::Receiver<()>) 
         .tcp_keepalive(Some(Duration::from_secs(60))) // TCP keep-alive
         .serve(make_svc);
 
-    let bind_ip = if bind_addr == [0, 0, 0, 0] {
-        "0.0.0.0"
-    } else {
-        "127.0.0.1"
-    };
-    eprintln!("🚀 HTTP server listening on http://{}:{}", bind_ip, port);
+    eprintln!("🚀 HTTP server listening on http://127.0.0.1:{}", port);
     eprintln!("✅ Enhanced connection handling enabled (keep-alive, timeouts, security)");
 
     // Graceful shutdown with broadcast receiver
