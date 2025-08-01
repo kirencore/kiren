@@ -6,11 +6,14 @@ mod tests;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
+#[cfg(feature = "swc_common")]
 use swc_common::{errors::Handler, sync::Lrc, SourceMap};
+#[cfg(feature = "swc_ts_fast_strip")]
 use swc_ts_fast_strip::{operate, Options};
 
 /// TypeScript to JavaScript transpiler using SWC
 pub struct TypeScriptTranspiler {
+    #[cfg(feature = "swc_common")]
     source_map: Lrc<SourceMap>,
     // Keep regex patterns for fallback compatibility
     type_annotations: Regex,
@@ -25,10 +28,9 @@ pub struct TypeScriptTranspiler {
 
 impl TypeScriptTranspiler {
     pub fn new() -> Self {
-        let source_map = Lrc::new(SourceMap::default());
-
         Self {
-            source_map,
+            #[cfg(feature = "swc_common")]
+            source_map: Lrc::new(SourceMap::default()),
             // Remove type annotations: : Type (but not in comments)
             type_annotations: Regex::new(
                 r"(?m)^(\s*)([^/\n]*?):\s*[A-Za-z_][A-Za-z0-9_\[\]<>|\s]*(\s*[,=){};\n])",
@@ -76,6 +78,7 @@ impl TypeScriptTranspiler {
     }
 
     /// Transpile using SWC for better performance and accuracy
+    #[cfg(all(feature = "swc_common", feature = "swc_ts_fast_strip"))]
     fn transpile_with_swc(&self, typescript_code: &str) -> Result<String> {
         let handler = Handler::with_emitter_writer(
             Box::new(std::io::stderr()),
@@ -96,6 +99,12 @@ impl TypeScriptTranspiler {
                 Err(e) => Err(anyhow!("SWC transpilation failed: {:?}", e)),
             }
         })
+    }
+
+    /// Fallback when SWC is not available
+    #[cfg(not(all(feature = "swc_common", feature = "swc_ts_fast_strip")))]
+    fn transpile_with_swc(&self, _typescript_code: &str) -> Result<String> {
+        Err(anyhow!("SWC not available, using regex fallback"))
     }
 
     /// Original regex-based transpilation as fallback

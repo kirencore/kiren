@@ -54,8 +54,8 @@ hex = "0.4"
 lazy_static = "1.4"
 sha2 = "0.10"
 md5 = "0.7"
-swc_common = "14.0"
-swc_ts_fast_strip = "28.0"
+swc_common = { version = "14.0", optional = true }
+swc_ts_fast_strip = { version = "28.0", optional = true }
 
 # WebAssembly dependencies (optional for WASM target only)
 wasm-bindgen = { version = "0.2", optional = true }
@@ -91,8 +91,9 @@ strip = true
 opt-level = "s"
 
 [features]
-default = ["cli"]
-cli = ["clap", "v8", "hyper", "reqwest", "tokio-util", "notify", "dirs", "ada-url", "tokio"]
+default = ["cli-basic"] 
+cli-basic = ["clap", "v8", "hyper", "reqwest", "tokio-util", "notify", "dirs", "ada-url", "tokio"]
+cli = ["clap", "v8", "hyper", "reqwest", "tokio-util", "notify", "dirs", "ada-url", "tokio", "swc_common", "swc_ts_fast_strip"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "console_error_panic_hook", "getrandom/js"]
 
 [package.metadata.wasm-pack]
