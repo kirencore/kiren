@@ -28,7 +28,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: kirencore/kiren
+        images: lastcodemaster/kiren
         tags: |
           type=ref,event=branch
           type=semver,pattern={{version}}
