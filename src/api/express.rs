@@ -624,15 +624,19 @@ fn register_route(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArgumen
             // Create mock request and response objects to test function behavior
             let mock_req = create_mock_request(scope, method, &path);
             let mock_res = create_mock_response(scope);
-            
+
             // Execute the function with mock objects
             let args = [mock_req.into(), mock_res.into()];
-            if let Some(_result) = func.call(scope, v8::undefined(scope).into(), &args) {
+            let undefined = v8::undefined(scope);
+            if let Some(_result) = func.call(scope, undefined.into(), &args) {
                 // Extract the response pattern from the mock response
                 extract_response_pattern(scope, mock_res, method, &path)
             } else {
                 // Fallback if execution fails
-                format!("function(req, res) {{ res.send('Default response for {} {}'); }}", method, path)
+                format!(
+                    "function(req, res) {{ res.send('Default response for {} {}'); }}",
+                    method, path
+                )
             }
         } else {
             // Fallback for functions that can't be converted
@@ -669,76 +673,76 @@ fn create_mock_request<'a>(
     path: &str,
 ) -> v8::Local<'a, v8::Object> {
     let req_obj = v8::Object::new(scope);
-    
+
     // Set method
     let method_key = v8::String::new(scope, "method").unwrap();
     let method_val = v8::String::new(scope, method).unwrap();
     req_obj.set(scope, method_key.into(), method_val.into());
-    
+
     // Set path
     let path_key = v8::String::new(scope, "path").unwrap();
     let path_val = v8::String::new(scope, path).unwrap();
     req_obj.set(scope, path_key.into(), path_val.into());
-    
+
     // Set url
     let url_key = v8::String::new(scope, "url").unwrap();
     req_obj.set(scope, url_key.into(), path_val.into());
-    
+
     // Set empty params and query
     let params_key = v8::String::new(scope, "params").unwrap();
     let params_obj = v8::Object::new(scope);
     req_obj.set(scope, params_key.into(), params_obj.into());
-    
+
     let query_key = v8::String::new(scope, "query").unwrap();
     let query_obj = v8::Object::new(scope);
     req_obj.set(scope, query_key.into(), query_obj.into());
-    
+
     // Set empty headers
     let headers_key = v8::String::new(scope, "headers").unwrap();
     let headers_obj = v8::Object::new(scope);
     req_obj.set(scope, headers_key.into(), headers_obj.into());
-    
+
     req_obj
 }
 
 fn create_mock_response<'a>(scope: &mut v8::HandleScope<'a>) -> v8::Local<'a, v8::Object> {
     let res_obj = v8::Object::new(scope);
-    
+
     // Internal state
     let status_key = v8::String::new(scope, "_statusCode").unwrap();
     let status_val = v8::Number::new(scope, 200.0);
     res_obj.set(scope, status_key.into(), status_val.into());
-    
+
     let headers_key = v8::String::new(scope, "_headers").unwrap();
     let headers_obj = v8::Object::new(scope);
     res_obj.set(scope, headers_key.into(), headers_obj.into());
-    
+
     let body_key = v8::String::new(scope, "_body").unwrap();
     let body_val = v8::String::new(scope, "").unwrap();
     res_obj.set(scope, body_key.into(), body_val.into());
-    
+
     let finished_key = v8::String::new(scope, "_finished").unwrap();
     let finished_val = v8::Boolean::new(scope, false);
     res_obj.set(scope, finished_key.into(), finished_val.into());
-    
+
     // Response method - status
     let status_method_key = v8::String::new(scope, "status").unwrap();
     let status_method_template = v8::FunctionTemplate::new(scope, mock_res_status);
     let status_method = status_method_template.get_function(scope).unwrap();
     res_obj.set(scope, status_method_key.into(), status_method.into());
-    
+
     // Response method - send
     let send_key = v8::String::new(scope, "send").unwrap();
     let send_template = v8::FunctionTemplate::new(scope, mock_res_send);
     let send_method = send_template.get_function(scope).unwrap();
     res_obj.set(scope, send_key.into(), send_method.into());
-    
+
     // Response method - json
     let json_key = v8::String::new(scope, "json").unwrap();
     let json_template = v8::FunctionTemplate::new(scope, mock_res_json);
     let json_method = json_template.get_function(scope).unwrap();
     res_obj.set(scope, json_key.into(), json_method.into());
-    
+
     res_obj
 }
 
@@ -753,7 +757,7 @@ fn mock_res_status(
         let status_key = v8::String::new(scope, "_statusCode").unwrap();
         this.set(scope, status_key.into(), status_code);
     }
-    rv.set(args.this());
+    rv.set(args.this().into());
 }
 
 fn mock_res_send(
@@ -764,7 +768,7 @@ fn mock_res_send(
     if args.length() > 0 {
         let this = args.this();
         let data = args.get(0);
-        
+
         // Set content-type to text/html if not set
         let headers_key = v8::String::new(scope, "_headers").unwrap();
         if let Some(headers_val) = this.get(scope, headers_key.into()) {
@@ -776,18 +780,18 @@ fn mock_res_send(
                 }
             }
         }
-        
+
         // Set body
         let body_key = v8::String::new(scope, "_body").unwrap();
         let data_str = data.to_string(scope).unwrap();
         this.set(scope, body_key.into(), data_str.into());
-        
+
         // Mark as finished
         let finished_key = v8::String::new(scope, "_finished").unwrap();
         let finished_val = v8::Boolean::new(scope, true);
         this.set(scope, finished_key.into(), finished_val.into());
     }
-    rv.set(args.this());
+    rv.set(args.this().into());
 }
 
 fn mock_res_json(
@@ -798,7 +802,7 @@ fn mock_res_json(
     if args.length() > 0 {
         let this = args.this();
         let data = args.get(0);
-        
+
         // Set content-type to application/json
         let headers_key = v8::String::new(scope, "_headers").unwrap();
         if let Some(headers_val) = this.get(scope, headers_key.into()) {
@@ -808,18 +812,25 @@ fn mock_res_json(
                 headers_obj.set(scope, ct_key.into(), ct_val.into());
             }
         }
-        
+
         // Convert data to JSON string and set as body
         let body_key = v8::String::new(scope, "_body").unwrap();
-        let json_str = v8::JSON::stringify(scope, data).unwrap();
+        let json_key = v8::String::new(scope, "JSON").unwrap();
+        let global = scope.get_current_context().global(scope);
+        let json_obj = global.get(scope, json_key.into()).unwrap();
+        let stringify_key = v8::String::new(scope, "stringify").unwrap();
+        let json_obj = v8::Local::<v8::Object>::try_from(json_obj).unwrap();
+        let stringify_fn = json_obj.get(scope, stringify_key.into()).unwrap();
+        let stringify_fn = v8::Local::<v8::Function>::try_from(stringify_fn).unwrap();
+        let json_str = stringify_fn.call(scope, json_obj.into(), &[data]).unwrap();
         this.set(scope, body_key.into(), json_str.into());
-        
+
         // Mark as finished
         let finished_key = v8::String::new(scope, "_finished").unwrap();
         let finished_val = v8::Boolean::new(scope, true);
         this.set(scope, finished_key.into(), finished_val.into());
     }
-    rv.set(args.this());
+    rv.set(args.this().into());
 }
 
 fn extract_response_pattern(
@@ -833,7 +844,7 @@ fn extract_response_pattern(
     if let Some(body_val) = mock_res.get(scope, body_key.into()) {
         let body_str = body_val.to_string(scope).unwrap();
         let body = body_str.to_rust_string_lossy(scope);
-        
+
         // Get content-type to determine response method
         let headers_key = v8::String::new(scope, "_headers").unwrap();
         if let Some(headers_val) = mock_res.get(scope, headers_key.into()) {
@@ -842,26 +853,35 @@ fn extract_response_pattern(
                 if let Some(ct_val) = headers_obj.get(scope, ct_key.into()) {
                     let ct_str = ct_val.to_string(scope).unwrap();
                     let content_type = ct_str.to_rust_string_lossy(scope);
-                    
+
                     if content_type.contains("application/json") {
                         // User called res.json()
                         return format!("function(req, res) {{ res.json({}); }}", body);
                     } else {
                         // User called res.send() or similar
-                        return format!("function(req, res) {{ res.send('{}'); }}", body.replace("'", "\\'"));
+                        return format!(
+                            "function(req, res) {{ res.send('{}'); }}",
+                            body.replace("'", "\\'")
+                        );
                     }
                 }
             }
         }
-        
+
         // Default to send if we have a body but no content-type
         if !body.is_empty() {
-            return format!("function(req, res) {{ res.send('{}'); }}", body.replace("'", "\\'"));
+            return format!(
+                "function(req, res) {{ res.send('{}'); }}",
+                body.replace("'", "\\'")
+            );
         }
     }
-    
+
     // Fallback if we couldn't extract anything meaningful
-    format!("function(req, res) {{ res.send('Response from {} {}'); }}", method, path)
+    format!(
+        "function(req, res) {{ res.send('Response from {} {}'); }}",
+        method, path
+    )
 }
 
 fn parse_route_pattern(path: &str) -> (String, Vec<String>) {
