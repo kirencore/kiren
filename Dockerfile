@@ -13,7 +13,7 @@ WORKDIR /app
 COPY . .
 
 # Build release binary
-RUN cargo build --release --features cli
+RUN cargo build --release --features cli-basic
 
 # Runtime stage
 FROM debian:bookworm-slim
