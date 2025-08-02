@@ -627,7 +627,8 @@ fn register_route(scope: &mut v8::HandleScope, args: v8::FunctionCallbackArgumen
             
             // Execute the function with mock objects
             let args = [mock_req.into(), mock_res.into()];
-            if let Some(_result) = func.call(scope, v8::undefined(scope).into(), &args) {
+            let undefined = v8::undefined(scope);
+            if let Some(_result) = func.call(scope, undefined.into(), &args) {
                 // Extract the response pattern from the mock response
                 extract_response_pattern(scope, mock_res, method, &path)
             } else {
@@ -753,7 +754,7 @@ fn mock_res_status(
         let status_key = v8::String::new(scope, "_statusCode").unwrap();
         this.set(scope, status_key.into(), status_code);
     }
-    rv.set(args.this());
+    rv.set(args.this().into());
 }
 
 fn mock_res_send(
@@ -787,7 +788,7 @@ fn mock_res_send(
         let finished_val = v8::Boolean::new(scope, true);
         this.set(scope, finished_key.into(), finished_val.into());
     }
-    rv.set(args.this());
+    rv.set(args.this().into());
 }
 
 fn mock_res_json(
@@ -811,7 +812,14 @@ fn mock_res_json(
         
         // Convert data to JSON string and set as body
         let body_key = v8::String::new(scope, "_body").unwrap();
-        let json_str = v8::JSON::stringify(scope, data).unwrap();
+        let json_key = v8::String::new(scope, "JSON").unwrap();
+        let global = scope.get_current_context().global(scope);
+        let json_obj = global.get(scope, json_key.into()).unwrap();
+        let stringify_key = v8::String::new(scope, "stringify").unwrap();
+        let json_obj = v8::Local::<v8::Object>::try_from(json_obj).unwrap();
+        let stringify_fn = json_obj.get(scope, stringify_key.into()).unwrap();
+        let stringify_fn = v8::Local::<v8::Function>::try_from(stringify_fn).unwrap();
+        let json_str = stringify_fn.call(scope, json_obj.into(), &[data]).unwrap();
         this.set(scope, body_key.into(), json_str.into());
         
         // Mark as finished
@@ -819,7 +827,7 @@ fn mock_res_json(
         let finished_val = v8::Boolean::new(scope, true);
         this.set(scope, finished_key.into(), finished_val.into());
     }
-    rv.set(args.this());
+    rv.set(args.this().into());
 }
 
 fn extract_response_pattern(
