@@ -10,7 +10,7 @@ A high-performance JavaScript runtime built with Rust, powered by the V8 engine.
 - **💻 REPL Mode**: Interactive JavaScript development environment
 - **📦 Module System**: ES Modules and CommonJS support (in development)
 - **⚡ Async/Await**: Full async/await support with proper event loop
-- **🎯 TypeScript**: TypeScript file execution support (planned)
+- **🎯 TypeScript**: Built-in TypeScript support (.ts, .tsx files)
 - **🐳 Docker Ready**: Single binary deployment, 15MB containers
 
 ## Installation
@@ -70,6 +70,12 @@ cp target/release/kiren /usr/local/bin/
 ### Execute JavaScript Files
 ```bash
 kiren examples/hello.js
+```
+
+### Execute TypeScript Files
+```bash
+kiren examples/hello.ts
+kiren examples/component.tsx
 ```
 
 ### REPL Mode
@@ -180,6 +186,46 @@ async function getUser() {
 getUser();
 ```
 
+### TypeScript Support
+```typescript
+// hello.ts - TypeScript with types
+interface User {
+    name: string;
+    age: number;
+}
+
+const users: User[] = [
+    { name: "Alice", age: 30 },
+    { name: "Bob", age: 25 }
+];
+
+function findUser(name: string): User | undefined {
+    return users.find(user => user.name === name);
+}
+
+const alice = findUser("Alice");
+console.log("Found user:", alice?.name);
+
+// Advanced TypeScript features
+type EventHandler<T> = (event: T) => void;
+
+class EventEmitter<T> {
+    private handlers: EventHandler<T>[] = [];
+    
+    on(handler: EventHandler<T>): void {
+        this.handlers.push(handler);
+    }
+    
+    emit(event: T): void {
+        this.handlers.forEach(handler => handler(event));
+    }
+}
+
+const emitter = new EventEmitter<string>();
+emitter.on((message) => console.log("Received:", message));
+emitter.emit("Hello TypeScript!");
+```
+
 ### 🔥 HTTP Server (Production Ready)
 ```javascript
 // Zero-config production server
@@ -249,6 +295,7 @@ CMD ["/kiren", "/app.js"]
 - [x] **File System API** - `fs.readFile`, `fs.writeFile`, `fs.exists`, `fs.mkdir`
 - [x] **Process API** - `process.env`, `process.argv`, `process.cwd()`, `process.exit()`
 - [x] **🔥 HTTP Server API** - Production-ready web server with routing
+- [x] **TypeScript Support** - Built-in TypeScript transpilation (.ts, .tsx files)
 
 ### 🔄 In Development
 - [ ] Enhanced error handling & stack traces
@@ -257,7 +304,7 @@ CMD ["/kiren", "/app.js"]
 - [ ] CommonJS compatibility layer
 
 ### 📋 Planned Features
-- [ ] TypeScript support (.ts, .tsx files)
+- [ ] Advanced TypeScript features (decorators, path mapping)
 - [ ] Package manager integration (npm-compatible)
 - [ ] WebAssembly support
 - [ ] Worker Threads

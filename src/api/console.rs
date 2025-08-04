@@ -167,11 +167,11 @@ fn console_log(
 ) {
     let message = format_args(scope, &args);
     let config = CONSOLE_CONFIG.lock().unwrap();
-    
+
     if config.silent {
         return;
     }
-    
+
     // For console.log, always show output but respect verbose/silent flags
     if config.verbose {
         println!("{}", format_message("INFO", &message));

@@ -182,7 +182,9 @@ async fn main() -> Result<()> {
         console::configure_console(verbose, silent);
     } else {
         // Use config LOG_LEVEL if no CLI flags
-        let log_silent = config.environment.get("LOG_LEVEL")
+        let log_silent = config
+            .environment
+            .get("LOG_LEVEL")
             .map(|level| level == "silent")
             .unwrap_or(false);
         console::configure_console(false, log_silent);
