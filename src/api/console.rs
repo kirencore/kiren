@@ -165,12 +165,19 @@ fn console_log(
     args: v8::FunctionCallbackArguments,
     _rv: v8::ReturnValue,
 ) {
-    if !should_log(LEVEL_INFO) {
+    let message = format_args(scope, &args);
+    let config = CONSOLE_CONFIG.lock().unwrap();
+    
+    if config.silent {
         return;
     }
-
-    let message = format_args(scope, &args);
-    println!("{}", format_message("INFO", &message));
+    
+    // For console.log, always show output but respect verbose/silent flags
+    if config.verbose {
+        println!("{}", format_message("INFO", &message));
+    } else {
+        println!("{}", message);
+    }
 }
 
 fn console_info(

@@ -177,8 +177,16 @@ async fn main() -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let silent = matches.get_flag("silent");
 
-    // Configure console logging
-    console::configure_console(verbose, silent);
+    // Configure console logging based on config and CLI args
+    if verbose || silent {
+        console::configure_console(verbose, silent);
+    } else {
+        // Use config LOG_LEVEL if no CLI flags
+        let log_silent = config.environment.get("LOG_LEVEL")
+            .map(|level| level == "silent")
+            .unwrap_or(false);
+        console::configure_console(false, log_silent);
+    }
 
     // Handle package manager subcommands
     match matches.subcommand() {

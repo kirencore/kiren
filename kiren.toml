@@ -40,4 +40,4 @@ debounce_ms = 50
 # Custom environment variables
 NODE_ENV = "development"
 DEBUG = "kiren:*"
-LOG_LEVEL = "info"
+LOG_LEVEL = "error"
