@@ -2,6 +2,7 @@ const std = @import("std");
 const Engine = @import("engine.zig").Engine;
 const engine = @import("engine.zig");
 const console = @import("api/console.zig");
+const process = @import("api/process.zig");
 const event_loop = @import("event_loop.zig");
 
 const VERSION = "0.1.0";
@@ -37,10 +38,18 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 pub fn main() u8 {
+    // Collect all arguments for process.argv
     var args = std.process.args();
-    _ = args.next(); // skip executable name
+    var argv_list: std.ArrayListUnmanaged([:0]const u8) = .{};
+    defer argv_list.deinit(std.heap.page_allocator);
 
-    const first_arg = args.next();
+    while (args.next()) |arg| {
+        argv_list.append(std.heap.page_allocator, arg) catch {};
+    }
+    process.setArgv(argv_list.items);
+
+    // Get first argument (skip executable name)
+    const first_arg = if (argv_list.items.len > 1) argv_list.items[1] else null;
 
     if (first_arg == null) {
         printUsage();
@@ -72,11 +81,12 @@ pub fn main() u8 {
 
     // Register APIs
     console.register(&eng);
+    process.register(&eng);
     event_loop.register(&eng);
 
     if (std.mem.eql(u8, arg, "-e")) {
         // Execute inline code
-        const code = args.next() orelse {
+        const code = if (argv_list.items.len > 2) argv_list.items[2] else {
             fatal("Error: code expected after -e\n", .{});
         };
 
