@@ -3,6 +3,7 @@ const engine = @import("../engine.zig");
 const c = engine.c;
 const net = std.net;
 const posix = std.posix;
+const websocket = @import("websocket.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -85,6 +86,7 @@ pub fn formatHttpResponse(allocator: Allocator, status: u16, status_text: []cons
 // Global server state
 var global_context: ?*c.JSContext = null;
 var global_fetch_callback: c.JSValue = undefined;
+var global_websocket_callback: ?c.JSValue = null;
 var server_running: bool = false;
 
 // Kiren.serve() implementation
@@ -121,10 +123,21 @@ fn kirenServe(
         return c.JS_ThrowTypeError(ctx, "serve() requires a fetch function");
     }
 
+    // Get optional websocket callback
+    const ws_val = c.JS_GetPropertyStr(ctx, options, "websocket");
+    const has_websocket = c.JS_IsObject(ws_val) != 0;
+
     // Store globals
     global_context = context;
     global_fetch_callback = c.JS_DupValue(ctx, fetch_val);
     c.JS_FreeValue(ctx, fetch_val);
+
+    if (has_websocket) {
+        global_websocket_callback = c.JS_DupValue(ctx, ws_val);
+        // Initialize WebSocket state
+        websocket.initGlobalState(context, ws_val);
+    }
+    c.JS_FreeValue(ctx, ws_val);
 
     // Start server in a separate function
     startServer(@intCast(port)) catch |err| {
@@ -160,18 +173,32 @@ fn startServer(port: u16) !void {
 }
 
 fn handleConnection(allocator: Allocator, connection: net.Server.Connection) !void {
-    defer connection.stream.close();
-
     var buf: [4096]u8 = undefined;
     const bytes_read = try connection.stream.read(&buf);
 
-    if (bytes_read == 0) return;
+    if (bytes_read == 0) {
+        connection.stream.close();
+        return;
+    }
 
     const request_data = buf[0..bytes_read];
 
     // Parse request
     var request = try parseHttpRequest(allocator, request_data);
+
+    // Check for WebSocket upgrade
+    if (global_websocket_callback != null and websocket.isWebSocketUpgrade(request.headers)) {
+        request.deinit(allocator);
+        // Handle as WebSocket - don't close the connection
+        websocket.handleWebSocket(allocator, connection.stream, request_data) catch |err| {
+            std.debug.print("WebSocket error: {}\n", .{err});
+            connection.stream.close();
+        };
+        return;
+    }
+
     defer request.deinit(allocator);
+    defer connection.stream.close();
 
     // Call JavaScript fetch handler
     const response = callFetchHandler(allocator, &request) catch |err| {
@@ -203,6 +230,21 @@ fn callFetchHandler(allocator: Allocator, request: *HttpRequest) ![]u8 {
     const full_url = std.fmt.bufPrint(&full_url_buf, "http://localhost{s}", .{request.path}) catch request.path;
     const full_url_str = c.JS_NewStringLen(ctx, full_url.ptr, full_url.len);
     _ = c.JS_SetPropertyStr(ctx, js_request, "fullUrl", full_url_str);
+
+    // Set body
+    if (request.body.len > 0) {
+        const body_str = c.JS_NewStringLen(ctx, request.body.ptr, request.body.len);
+        _ = c.JS_SetPropertyStr(ctx, js_request, "body", body_str);
+    }
+
+    // Set headers as object
+    const js_headers = c.JS_NewObject(ctx);
+    var iter = request.headers.iterator();
+    while (iter.next()) |entry| {
+        const header_val = c.JS_NewStringLen(ctx, entry.value_ptr.*.ptr, entry.value_ptr.*.len);
+        _ = c.JS_SetPropertyStr(ctx, js_headers, @ptrCast(entry.key_ptr.*.ptr), header_val);
+    }
+    _ = c.JS_SetPropertyStr(ctx, js_request, "headers", js_headers);
 
     // Call fetch function
     var args = [_]c.JSValue{js_request};

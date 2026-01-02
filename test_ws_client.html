@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kiren WebSocket Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+        #log { background: #000; padding: 10px; height: 300px; overflow-y: auto; border: 1px solid #0f0; }
+        input, button { font-family: monospace; padding: 8px; margin: 5px 0; }
+        input { width: 300px; background: #000; color: #0f0; border: 1px solid #0f0; }
+        button { background: #0f0; color: #000; cursor: pointer; border: none; }
+        button:hover { background: #0a0; }
+        .error { color: #f00; }
+        .success { color: #0f0; }
+        .info { color: #0ff; }
+    </style>
+</head>
+<body>
+    <h2>🔌 Kiren WebSocket Test</h2>
+    <div>
+        <input type="text" id="url" value="ws://localhost:3000" placeholder="WebSocket URL">
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+    <div>
+        <input type="text" id="message" placeholder="Message to send">
+        <button onclick="send()">Send</button>
+    </div>
+    <h3>Log:</h3>
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+        const log = document.getElementById('log');
+
+        function addLog(msg, type = '') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function connect() {
+            const url = document.getElementById('url').value;
+            addLog(`Connecting to ${url}...`, 'info');
+
+            try {
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    addLog('Connected!', 'success');
+                };
+
+                ws.onmessage = (e) => {
+                    addLog(`Received: ${e.data}`, 'success');
+                };
+
+                ws.onerror = (e) => {
+                    addLog(`Error: ${e.message || 'Connection error'}`, 'error');
+                };
+
+                ws.onclose = () => {
+                    addLog('Disconnected', 'info');
+                };
+            } catch (e) {
+                addLog(`Error: ${e.message}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function send() {
+            const msg = document.getElementById('message').value;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(msg);
+                addLog(`Sent: ${msg}`, 'info');
+            } else {
+                addLog('Not connected!', 'error');
+            }
+        }
+
+        // Auto-connect on load
+        setTimeout(connect, 500);
+    </script>
+</body>
+</html>

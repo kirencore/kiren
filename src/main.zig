@@ -9,8 +9,10 @@ const buffer = @import("api/buffer.zig");
 const url = @import("api/url.zig");
 const encoding = @import("api/encoding.zig");
 const crypto = @import("api/crypto.zig");
+const fetch = @import("api/fetch.zig");
 const module = @import("api/module.zig");
 const http = @import("api/http.zig");
+const websocket = @import("api/websocket.zig");
 const event_loop = @import("event_loop.zig");
 
 const VERSION = "0.1.0";
@@ -96,8 +98,10 @@ pub fn main() u8 {
     url.register(&eng);
     encoding.register(&eng);
     crypto.register(&eng);
+    fetch.register(&eng);
     module.register(&eng);
     http.register(&eng);
+    websocket.register(&eng);
     event_loop.register(&eng);
 
     if (std.mem.eql(u8, arg, "-e")) {
