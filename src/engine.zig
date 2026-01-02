@@ -203,3 +203,12 @@ pub fn makeNull() JSValue {
         .tag = JS_TAG_NULL,
     };
 }
+
+pub const JS_TAG_BOOL: i64 = 1;
+
+pub fn makeBool(val: bool) JSValue {
+    return JSValue{
+        .u = .{ .int32 = if (val) 1 else 0 },
+        .tag = JS_TAG_BOOL,
+    };
+}

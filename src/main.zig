@@ -3,6 +3,9 @@ const Engine = @import("engine.zig").Engine;
 const engine = @import("engine.zig");
 const console = @import("api/console.zig");
 const process = @import("api/process.zig");
+const path = @import("api/path.zig");
+const fs = @import("api/fs.zig");
+const http = @import("api/http.zig");
 const event_loop = @import("event_loop.zig");
 
 const VERSION = "0.1.0";
@@ -82,6 +85,9 @@ pub fn main() u8 {
     // Register APIs
     console.register(&eng);
     process.register(&eng);
+    path.register(&eng);
+    fs.register(&eng);
+    http.register(&eng);
     event_loop.register(&eng);
 
     if (std.mem.eql(u8, arg, "-e")) {
