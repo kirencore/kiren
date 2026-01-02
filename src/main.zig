@@ -2,6 +2,7 @@ const std = @import("std");
 const Engine = @import("engine.zig").Engine;
 const engine = @import("engine.zig");
 const console = @import("api/console.zig");
+const event_loop = @import("event_loop.zig");
 
 const VERSION = "0.1.0";
 
@@ -64,8 +65,14 @@ pub fn main() u8 {
     };
     defer eng.deinit();
 
+    // Initialize event loop
+    var loop = event_loop.EventLoop.init(std.heap.page_allocator, eng.context);
+    defer loop.deinit();
+    event_loop.setGlobalEventLoop(&loop);
+
     // Register APIs
     console.register(&eng);
+    event_loop.register(&eng);
 
     if (std.mem.eql(u8, arg, "-e")) {
         // Execute inline code
@@ -80,6 +87,10 @@ pub fn main() u8 {
                 printResult(&eng, val);
             }
             eng.freeValue(val);
+
+            // Run event loop if there are pending timers
+            loop.run();
+
             return 0;
         } else |_| {
             return 1;
@@ -89,6 +100,10 @@ pub fn main() u8 {
         const result = eng.evalFile(arg);
         if (result) |val| {
             eng.freeValue(val);
+
+            // Run event loop if there are pending timers
+            loop.run();
+
             return 0;
         } else |_| {
             return 1;

@@ -19,6 +19,8 @@ pub fn build(b: *std.Build) void {
         "-DCONFIG_VERSION=\"2024-01-13\"",
         "-DCONFIG_BIGNUM",
         "-D_GNU_SOURCE",
+        "-fno-sanitize=undefined", // QuickJS relies on C undefined behavior
+        "-fwrapv", // Allow signed integer wrapping
     };
 
     // Main executable

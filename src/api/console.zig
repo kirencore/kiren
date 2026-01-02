@@ -16,23 +16,39 @@ fn printValue(ctx: *c.JSContext, val: c.JSValue, depth: u8) void {
 
     // Undefined
     if (c.JS_IsUndefined(val) != 0) {
-        print("\x1b[90mundefined\x1b[0m", .{});
+        if (depth == 0) {
+            print("undefined", .{});
+        } else {
+            print("\x1b[90mundefined\x1b[0m", .{});
+        }
         return;
     }
 
     // Null
     if (c.JS_IsNull(val) != 0) {
-        print("\x1b[1mnull\x1b[0m", .{});
+        if (depth == 0) {
+            print("null", .{});
+        } else {
+            print("\x1b[1mnull\x1b[0m", .{});
+        }
         return;
     }
 
     // Boolean
     if (c.JS_IsBool(val) != 0) {
         const b = c.JS_ToBool(ctx, val);
-        if (b != 0) {
-            print("\x1b[33mtrue\x1b[0m", .{});
+        if (depth == 0) {
+            if (b != 0) {
+                print("true", .{});
+            } else {
+                print("false", .{});
+            }
         } else {
-            print("\x1b[33mfalse\x1b[0m", .{});
+            if (b != 0) {
+                print("\x1b[33mtrue\x1b[0m", .{});
+            } else {
+                print("\x1b[33mfalse\x1b[0m", .{});
+            }
         }
         return;
     }
@@ -42,9 +58,17 @@ fn printValue(ctx: *c.JSContext, val: c.JSValue, depth: u8) void {
         var num: f64 = 0;
         _ = c.JS_ToFloat64(ctx, &num, val);
         if (@floor(num) == num and num < 1e15 and num > -1e15) {
-            print("\x1b[33m{d}\x1b[0m", .{@as(i64, @intFromFloat(num))});
+            if (depth == 0) {
+                print("{d}", .{@as(i64, @intFromFloat(num))});
+            } else {
+                print("\x1b[33m{d}\x1b[0m", .{@as(i64, @intFromFloat(num))});
+            }
         } else {
-            print("\x1b[33m{d}\x1b[0m", .{num});
+            if (depth == 0) {
+                print("{d}", .{num});
+            } else {
+                print("\x1b[33m{d}\x1b[0m", .{num});
+            }
         }
         return;
     }
