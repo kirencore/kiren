@@ -13,6 +13,16 @@ var groomings = {};
 var users = [];
 var wsConnections = {}; // Map ws.id -> { roomId, userId }
 
+// Default metrics for voting (Fibonacci sequence for story points)
+var DEFAULT_METRICS = [
+  {
+    id: 1,
+    name: "storyPoint",
+    order: 1,
+    points: ["0", "1", "2", "3", "5", "8", "13", "21", "?", "☕"]
+  }
+];
+
 // CORS options
 var corsOptions = {
   origin: "*",
@@ -283,11 +293,17 @@ Kiren.serve({
     },
 
     message: function(ws, data) {
+      var msg;
       try {
-        var msg = JSON.parse(data);
+        msg = JSON.parse(data);
+      } catch (e) {
+        console.log("Invalid JSON:", data);
+        return;
+      }
+      try {
         handleWsMessage(ws, msg);
       } catch (e) {
-        console.log("Invalid WS message:", data);
+        console.log("Handler error for", msg.type + ":", e);
       }
     },
 
@@ -356,8 +372,8 @@ function handleHttpRequest(rawReq) {
     res.json({ status: "ok", runtime: "kiren", version: "0.1.0", binary: "754KB", features: ["http", "websocket"] });
   }
   else if (method === "POST" && path === "/room/create") {
-    var nickname = req.body && req.body.nickname;
-    var groomingType = req.body && req.body.groomingType;
+    var nickname = req.body && (req.body.nickname || req.body.nickName);
+    var groomingType = req.body && (req.body.groomingType || 0);
     if (!nickname) {
       res.status(400).json({ error: "Nickname is required" });
     } else {
@@ -368,10 +384,10 @@ function handleHttpRequest(rawReq) {
         expireTime: now + 12 * 60 * 60 * 1000, participants: [], votes: {},
         issues: [], currentIssue: null, showVotes: false
       };
-      var user = { userID: users.length + 1, credentials: uuid(), nickname: nickname, roomID: roomId, connected: true, isAdmin: true };
+      var user = { userID: users.length + 1, credentials: uuid(), nickname: nickname, roomID: roomId, connected: true, isAdmin: true, sockets: [], votes: {} };
       users.push(user);
       groomings[roomId].participants.push(user);
-      res.json({ roomId: roomId, credentials: user.credentials, userID: user.userID });
+      res.status(201).json({ roomID: roomId, credentials: user.credentials, userID: user.userID, isAdmin: true });
     }
   }
   else if (method === "GET" && path.match(/^\/room\/[a-f0-9-]+$/)) {
@@ -390,7 +406,7 @@ function handleHttpRequest(rawReq) {
   }
   else if (method === "POST" && path.match(/^\/room\/[a-f0-9-]+$/)) {
     var roomId = path.split("/")[2];
-    var nickname = req.body && req.body.nickname;
+    var nickname = req.body && (req.body.nickname || req.body.nickName);
     if (!nickname) {
       res.status(400).json({ error: "Nickname is required" });
     } else {
@@ -398,11 +414,47 @@ function handleHttpRequest(rawReq) {
       if (!room) {
         res.status(404).json({ error: "Room not found" });
       } else {
-        var user = { userID: users.length + 1, credentials: uuid(), nickname: nickname, roomID: roomId, connected: true, isAdmin: false };
+        var user = { userID: users.length + 1, credentials: uuid(), nickname: nickname, roomID: roomId, connected: true, isAdmin: false, sockets: [], votes: {} };
         users.push(user);
         room.participants.push(user);
-        res.json({ roomId: roomId, credentials: user.credentials, userID: user.userID, groomingType: room.groomingType, participants: room.participants.length });
+        res.json({ roomID: roomId, credentials: user.credentials, userID: user.userID, groomingType: room.groomingType, participants: room.participants.length, isAdmin: false });
       }
+    }
+  }
+  else if (method === "POST" && path.match(/^\/room\/[a-f0-9-]+\/vote$/)) {
+    var roomId = path.split("/")[2];
+    var userId = req.body && req.body.userId;
+    var vote = req.body && req.body.vote;
+    var room = groomings[roomId];
+    if (!room) {
+      res.status(404).json({ error: "Room not found" });
+    } else {
+      room.votes[userId] = vote;
+      broadcastToRoom(roomId, { type: "vote_update", userId: userId, hasVoted: true });
+      res.json({ success: true });
+    }
+  }
+  else if (method === "POST" && path.match(/^\/room\/[a-f0-9-]+\/reveal$/)) {
+    var roomId = path.split("/")[2];
+    var room = groomings[roomId];
+    if (!room) {
+      res.status(404).json({ error: "Room not found" });
+    } else {
+      room.showVotes = true;
+      broadcastToRoom(roomId, { type: "votes_revealed", votes: room.votes });
+      res.json({ success: true, votes: room.votes });
+    }
+  }
+  else if (method === "POST" && path.match(/^\/room\/[a-f0-9-]+\/reset$/)) {
+    var roomId = path.split("/")[2];
+    var room = groomings[roomId];
+    if (!room) {
+      res.status(404).json({ error: "Room not found" });
+    } else {
+      room.votes = {};
+      room.showVotes = false;
+      broadcastToRoom(roomId, { type: "votes_reset" });
+      res.json({ success: true });
     }
   }
   else if (method === "POST" && path === "/storypoint/estimate") {
@@ -423,64 +475,171 @@ function handleHttpRequest(rawReq) {
   return new Response(resBody, { status: resStatus, headers: resHeaders });
 }
 
+// Helper: Build grooming info response
+function buildGroomingInfo(room) {
+  return {
+    roomID: room.roomID,
+    participants: room.participants,
+    votes: room.votes,
+    isResultShown: room.showVotes,
+    mode: room.groomingType,
+    issues: room.issues || [],
+    currentIssue: room.currentIssue,
+    metrics: room.metrics || DEFAULT_METRICS
+  };
+}
+
 // WebSocket message handler
 function handleWsMessage(ws, msg) {
   var conn = wsConnections[ws.id];
+  var msgType = msg.type;
+  var msgData = msg.data;
 
-  switch (msg.type) {
-    case "join_room":
-      conn.roomId = msg.roomId;
-      conn.userId = msg.userId;
-      // Notify room
-      broadcastToRoom(msg.roomId, {
-        type: "user_joined",
-        userId: msg.userId,
-        nickname: msg.nickname
-      }, ws.id);
-      break;
+  console.log("WS message:", msgType, JSON.stringify(msgData));
 
-    case "vote":
-      if (conn.roomId) {
-        var room = groomings[conn.roomId];
-        if (room) {
-          room.votes[conn.userId] = msg.vote;
-          broadcastToRoom(conn.roomId, {
-            type: "vote_update",
-            userId: conn.userId,
-            hasVoted: true
-          });
+  switch (msgType) {
+    case "joinRoom":
+      // Frontend sends: { nickname, roomID, lobby }
+      var joinData = msgData;
+      var roomId = joinData.roomID;
+      var lobby = joinData.lobby;
+
+      conn.roomId = roomId;
+      conn.credentials = lobby ? lobby.credentials : null;
+      conn.userId = lobby ? lobby.userID : null;
+      conn.nickname = joinData.nickname;
+
+      console.log("joinRoom: roomId=" + roomId + ", userId=" + conn.userId);
+      console.log("joinRoom: groomings keys=" + Object.keys(groomings).join(", "));
+
+      // Join the WebSocket room
+      Kiren.wsJoinRoom(ws, roomId);
+
+      var room = groomings[roomId];
+      console.log("joinRoom: room found=" + (room ? "yes" : "no"));
+      if (room) {
+        console.log("joinRoom: participants=" + JSON.stringify(room.participants));
+        // Update participant connection status and add socket
+        for (var i = 0; i < room.participants.length; i++) {
+          if (room.participants[i].userID === conn.userId) {
+            room.participants[i].connected = true;
+            if (!room.participants[i].sockets) {
+              room.participants[i].sockets = [];
+            }
+            room.participants[i].sockets.push(ws.id);
+            if (!room.participants[i].votes) {
+              room.participants[i].votes = {};
+            }
+            break;
+          }
         }
+        // Send current room state to joiner
+        var groomingInfo = buildGroomingInfo(room);
+        console.log("joinRoom: sending voteSent=" + JSON.stringify(groomingInfo));
+        Kiren.wsSend(ws, JSON.stringify({
+          type: "voteSent",
+          data: groomingInfo
+        }));
+        // Broadcast updated state to room
+        broadcastToRoom(roomId, {
+          type: "voteSent",
+          data: buildGroomingInfo(room)
+        });
       }
       break;
 
-    case "reveal_votes":
-      if (conn.roomId) {
-        var room = groomings[conn.roomId];
-        if (room) {
-          room.showVotes = true;
-          broadcastToRoom(conn.roomId, {
-            type: "votes_revealed",
-            votes: room.votes
-          });
+    case "userVote":
+      // Frontend sends: [voteObj, roomID, credentials]
+      var voteObj = msgData[0];
+      var roomId = msgData[1];
+      var credentials = msgData[2];
+
+      var room = groomings[roomId];
+      if (room) {
+        // Find user by credentials
+        var user = null;
+        for (var i = 0; i < room.participants.length; i++) {
+          if (room.participants[i].credentials === credentials) {
+            user = room.participants[i];
+            break;
+          }
         }
+        if (user) {
+          user.votes = voteObj;
+          room.votes[user.userID] = voteObj;
+        }
+        // Broadcast updated state
+        broadcastToRoom(roomId, {
+          type: "voteSent",
+          data: buildGroomingInfo(room)
+        });
       }
       break;
 
-    case "reset_votes":
-      if (conn.roomId) {
-        var room = groomings[conn.roomId];
-        if (room) {
-          room.votes = {};
-          room.showVotes = false;
-          broadcastToRoom(conn.roomId, {
-            type: "votes_reset"
-          });
+    case "showResults":
+      // Frontend sends: [roomId, credentials]
+      var roomId = msgData[0];
+      var credentials = msgData[1];
+
+      var room = groomings[roomId];
+      if (room) {
+        room.showVotes = true;
+        broadcastToRoom(roomId, {
+          type: "showResults",
+          data: buildGroomingInfo(room)
+        });
+      }
+      break;
+
+    case "resetVotes":
+      // Frontend sends: [roomId, credentials]
+      var roomId = msgData[0];
+      var credentials = msgData[1];
+
+      var room = groomings[roomId];
+      if (room) {
+        room.votes = {};
+        room.showVotes = false;
+        // Clear participant votes
+        for (var i = 0; i < room.participants.length; i++) {
+          room.participants[i].votes = {};
         }
+        broadcastToRoom(roomId, {
+          type: "resetVotes",
+          data: buildGroomingInfo(room)
+        });
       }
       break;
 
     case "ping":
       Kiren.wsSend(ws, JSON.stringify({ type: "pong" }));
+      break;
+
+    case "updateAvatar":
+      // Frontend sends: [roomID, avatarConfig, credentials]
+      var roomId = msgData[0];
+      var avatarConfig = msgData[1];
+      var credentials = msgData[2];
+
+      var room = groomings[roomId];
+      if (room) {
+        // Find user by credentials and update avatar
+        for (var i = 0; i < room.participants.length; i++) {
+          if (room.participants[i].credentials === credentials) {
+            room.participants[i].avatar = avatarConfig;
+            break;
+          }
+        }
+        // Broadcast avatar update
+        broadcastToRoom(roomId, {
+          type: "avatarUpdated",
+          data: {
+            credentials: credentials,
+            avatar: avatarConfig,
+            participants: room.participants
+          }
+        });
+      }
       break;
   }
 }

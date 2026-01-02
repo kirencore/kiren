@@ -172,6 +172,17 @@ fn startServer(port: u16) !void {
     }
 }
 
+// Thread wrapper for WebSocket handling
+fn handleWebSocketThread(allocator: Allocator, stream: net.Stream, request_data_ptr: [*]const u8, request_data_len: usize) void {
+    const request_data = request_data_ptr[0..request_data_len];
+    defer allocator.free(request_data);
+
+    websocket.handleWebSocket(allocator, stream, request_data) catch |err| {
+        std.debug.print("WebSocket error: {}\n", .{err});
+        stream.close();
+    };
+}
+
 fn handleConnection(allocator: Allocator, connection: net.Server.Connection) !void {
     var buf: [4096]u8 = undefined;
     const bytes_read = try connection.stream.read(&buf);
@@ -189,11 +200,22 @@ fn handleConnection(allocator: Allocator, connection: net.Server.Connection) !vo
     // Check for WebSocket upgrade
     if (global_websocket_callback != null and websocket.isWebSocketUpgrade(request.headers)) {
         request.deinit(allocator);
-        // Handle as WebSocket - don't close the connection
-        websocket.handleWebSocket(allocator, connection.stream, request_data) catch |err| {
-            std.debug.print("WebSocket error: {}\n", .{err});
+
+        // Copy request data to heap for thread safety
+        const heap_data = allocator.alloc(u8, request_data.len) catch {
             connection.stream.close();
+            return;
         };
+        @memcpy(heap_data, request_data);
+
+        // Handle WebSocket in a separate thread so HTTP can continue
+        const ws_thread = std.Thread.spawn(.{}, handleWebSocketThread, .{ allocator, connection.stream, heap_data.ptr, heap_data.len }) catch |err| {
+            std.debug.print("Failed to spawn WebSocket thread: {}\n", .{err});
+            allocator.free(heap_data);
+            connection.stream.close();
+            return;
+        };
+        ws_thread.detach();
         return;
     }
 
@@ -272,6 +294,7 @@ fn parseJsResponse(allocator: Allocator, ctx: *c.JSContext, response: c.JSValue)
     var status: i32 = 200;
     var body: []const u8 = "";
     var content_type: []const u8 = "text/plain";
+    var has_cors: bool = false;
 
     // Check if it's a Response object or plain object
     if (c.JS_IsObject(response) != 0) {
@@ -292,10 +315,15 @@ fn parseJsResponse(allocator: Allocator, ctx: *c.JSContext, response: c.JSValue)
         }
         c.JS_FreeValue(ctx, body_val);
 
-        // Get content-type from headers
+        // Get all headers from Response object
         const headers_val = c.JS_GetPropertyStr(ctx, response, "_headers");
         if (c.JS_IsObject(headers_val) != 0) {
-            const ct_val = c.JS_GetPropertyStr(ctx, headers_val, "content-type");
+            // Get content-type (try both cases)
+            var ct_val = c.JS_GetPropertyStr(ctx, headers_val, "content-type");
+            if (c.JS_IsUndefined(ct_val) != 0) {
+                c.JS_FreeValue(ctx, ct_val);
+                ct_val = c.JS_GetPropertyStr(ctx, headers_val, "Content-Type");
+            }
             if (c.JS_IsString(ct_val) != 0) {
                 const ct_str = c.JS_ToCString(ctx, ct_val);
                 if (ct_str != null) {
@@ -303,6 +331,13 @@ fn parseJsResponse(allocator: Allocator, ctx: *c.JSContext, response: c.JSValue)
                 }
             }
             c.JS_FreeValue(ctx, ct_val);
+
+            // Get CORS headers
+            const cors_origin = c.JS_GetPropertyStr(ctx, headers_val, "Access-Control-Allow-Origin");
+            if (c.JS_IsString(cors_origin) != 0) {
+                has_cors = true;
+            }
+            c.JS_FreeValue(ctx, cors_origin);
         }
         c.JS_FreeValue(ctx, headers_val);
     } else if (c.JS_IsString(response) != 0) {
@@ -314,8 +349,11 @@ fn parseJsResponse(allocator: Allocator, ctx: *c.JSContext, response: c.JSValue)
     }
 
     const status_text = getStatusText(@intCast(status));
-    var header_buf: [256]u8 = undefined;
-    const headers = std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: close", .{content_type}) catch "Content-Type: text/plain\r\nConnection: close";
+    var header_buf: [512]u8 = undefined;
+    const headers = if (has_cors)
+        std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization", .{content_type}) catch "Content-Type: text/plain\r\nConnection: close"
+    else
+        std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: close", .{content_type}) catch "Content-Type: text/plain\r\nConnection: close";
 
     return formatHttpResponse(allocator, @intCast(status), status_text, headers, body);
 }
