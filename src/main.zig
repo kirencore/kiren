@@ -3,8 +3,10 @@ const Engine = @import("engine.zig").Engine;
 const engine = @import("engine.zig");
 const console = @import("api/console.zig");
 const process = @import("api/process.zig");
-const path = @import("api/path.zig");
+const path_mod = @import("api/path.zig");
 const fs = @import("api/fs.zig");
+const buffer = @import("api/buffer.zig");
+const module = @import("api/module.zig");
 const http = @import("api/http.zig");
 const event_loop = @import("event_loop.zig");
 
@@ -85,8 +87,10 @@ pub fn main() u8 {
     // Register APIs
     console.register(&eng);
     process.register(&eng);
-    path.register(&eng);
+    path_mod.register(&eng);
     fs.register(&eng);
+    buffer.register(&eng);
+    module.register(&eng);
     http.register(&eng);
     event_loop.register(&eng);
 
@@ -113,6 +117,11 @@ pub fn main() u8 {
         }
     } else {
         // Execute file
+        // Set module directory based on script location
+        if (std.fs.path.dirname(arg)) |dir| {
+            module.setModuleDir(dir);
+        }
+
         const result = eng.evalFile(arg);
         if (result) |val| {
             eng.freeValue(val);

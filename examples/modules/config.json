@@ -1,0 +1,8 @@
+{
+  "name": "kiren-app",
+  "version": "0.1.0",
+  "settings": {
+    "debug": true,
+    "port": 3000
+  }
+}

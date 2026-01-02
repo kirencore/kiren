@@ -212,3 +212,12 @@ pub fn makeBool(val: bool) JSValue {
         .tag = JS_TAG_BOOL,
     };
 }
+
+pub const JS_TAG_EXCEPTION: i64 = 6;
+
+pub fn makeException() JSValue {
+    return JSValue{
+        .u = .{ .int32 = 0 },
+        .tag = JS_TAG_EXCEPTION,
+    };
+}
