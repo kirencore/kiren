@@ -184,15 +184,88 @@ fn handleWebSocketThread(allocator: Allocator, stream: net.Stream, request_data_
 }
 
 fn handleConnection(allocator: Allocator, connection: net.Server.Connection) !void {
-    var buf: [4096]u8 = undefined;
-    const bytes_read = try connection.stream.read(&buf);
+    // Dynamic buffer - start with 8KB, grow as needed up to 10MB max
+    const initial_size: usize = 8192;
+    const max_size: usize = 10 * 1024 * 1024; // 10MB max request size
 
-    if (bytes_read == 0) {
+    var buffer = allocator.alloc(u8, initial_size) catch {
+        connection.stream.close();
+        return;
+    };
+    defer allocator.free(buffer);
+
+    var total_read: usize = 0;
+
+    // Read until we have complete headers (ends with \r\n\r\n)
+    while (true) {
+        // Grow buffer if needed
+        if (total_read >= buffer.len) {
+            if (buffer.len >= max_size) {
+                // Request too large
+                const error_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 19\r\n\r\nRequest Too Large\r\n";
+                _ = connection.stream.write(error_response) catch {};
+                connection.stream.close();
+                return;
+            }
+            const new_size = @min(buffer.len * 2, max_size);
+            buffer = allocator.realloc(buffer, new_size) catch {
+                connection.stream.close();
+                return;
+            };
+        }
+
+        const bytes_read = connection.stream.read(buffer[total_read..]) catch |err| {
+            if (err == error.WouldBlock) {
+                // No more data available right now
+                break;
+            }
+            connection.stream.close();
+            return;
+        };
+
+        if (bytes_read == 0) {
+            if (total_read == 0) {
+                connection.stream.close();
+                return;
+            }
+            break;
+        }
+
+        total_read += bytes_read;
+
+        // Check if we have complete headers
+        if (std.mem.indexOf(u8, buffer[0..total_read], "\r\n\r\n")) |header_end| {
+            // Check Content-Length for body
+            const headers_str = buffer[0..header_end];
+            const content_length = getContentLength(headers_str);
+
+            if (content_length > 0) {
+                const body_start = header_end + 4;
+                const body_received = total_read - body_start;
+
+                // Read remaining body if needed
+                while (body_received + (total_read - body_start) < content_length) {
+                    if (total_read >= buffer.len) {
+                        if (buffer.len >= max_size) break;
+                        const new_size = @min(buffer.len * 2, max_size);
+                        buffer = allocator.realloc(buffer, new_size) catch break;
+                    }
+
+                    const more = connection.stream.read(buffer[total_read..]) catch break;
+                    if (more == 0) break;
+                    total_read += more;
+                }
+            }
+            break;
+        }
+    }
+
+    if (total_read == 0) {
         connection.stream.close();
         return;
     }
 
-    const request_data = buf[0..bytes_read];
+    const request_data = buffer[0..total_read];
 
     // Parse request
     var request = try parseHttpRequest(allocator, request_data);
@@ -220,18 +293,30 @@ fn handleConnection(allocator: Allocator, connection: net.Server.Connection) !vo
     }
 
     defer request.deinit(allocator);
-    defer connection.stream.close();
 
     // Call JavaScript fetch handler
     const response = callFetchHandler(allocator, &request) catch |err| {
         std.debug.print("Fetch handler error: {}\n", .{err});
-        const error_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 21\r\n\r\nInternal Server Error";
+        const error_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 21\r\nConnection: close\r\n\r\nInternal Server Error";
         _ = connection.stream.write(error_response) catch {};
+        connection.stream.close();
         return;
     };
     defer allocator.free(response);
 
-    _ = try connection.stream.write(response);
+    _ = connection.stream.write(response) catch {
+        connection.stream.close();
+        return;
+    };
+
+    // Check if client wants to keep connection alive
+    const connection_header = request.headers.get("Connection") orelse request.headers.get("connection");
+    const keep_alive = if (connection_header) |h| std.mem.eql(u8, h, "keep-alive") else false;
+
+    if (!keep_alive) {
+        connection.stream.close();
+    }
+    // If keep-alive, connection stays open for next request (handled by accept loop)
 }
 
 fn callFetchHandler(allocator: Allocator, request: *HttpRequest) ![]u8 {
@@ -351,11 +436,32 @@ fn parseJsResponse(allocator: Allocator, ctx: *c.JSContext, response: c.JSValue)
     const status_text = getStatusText(@intCast(status));
     var header_buf: [512]u8 = undefined;
     const headers = if (has_cors)
-        std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization", .{content_type}) catch "Content-Type: text/plain\r\nConnection: close"
+        std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: keep-alive\r\nKeep-Alive: timeout=5, max=100\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization", .{content_type}) catch "Content-Type: text/plain\r\nConnection: keep-alive"
     else
-        std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: close", .{content_type}) catch "Content-Type: text/plain\r\nConnection: close";
+        std.fmt.bufPrint(&header_buf, "Content-Type: {s}\r\nConnection: keep-alive\r\nKeep-Alive: timeout=5, max=100", .{content_type}) catch "Content-Type: text/plain\r\nConnection: keep-alive";
 
     return formatHttpResponse(allocator, @intCast(status), status_text, headers, body);
+}
+
+fn getContentLength(headers: []const u8) usize {
+    // Look for Content-Length header (case-insensitive)
+    var lines = std.mem.splitSequence(u8, headers, "\r\n");
+    while (lines.next()) |line| {
+        // Simple case-insensitive check for content-length
+        if (line.len >= 16) {
+            var lower_buf: [64]u8 = undefined;
+            const check_len = @min(line.len, 64);
+            for (line[0..check_len], 0..) |ch, i| {
+                lower_buf[i] = if (ch >= 'A' and ch <= 'Z') ch + 32 else ch;
+            }
+            if (std.mem.startsWith(u8, lower_buf[0..check_len], "content-length:")) {
+                const value_start = std.mem.indexOf(u8, line, ":") orelse continue;
+                const value_str = std.mem.trim(u8, line[value_start + 1 ..], " \t");
+                return std.fmt.parseInt(usize, value_str, 10) catch 0;
+            }
+        }
+    }
+    return 0;
 }
 
 fn getStatusText(status: u16) []const u8 {
