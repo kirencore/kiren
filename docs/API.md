@@ -7,6 +7,7 @@ Kiren is a lightweight JavaScript runtime built with Zig and QuickJS. This docum
 - [Kiren Global Object](#kiren-global-object)
 - [HTTP Server](#http-server)
 - [WebSocket Server](#websocket-server)
+- [SQLite Database](#sqlite-database)
 - [File System](#file-system)
 - [Path](#path)
 - [Process](#process)
@@ -166,6 +167,141 @@ Sends a message to all clients in a room.
 |-----------|------|-------------|
 | `roomId` | `string` | Room identifier |
 | `message` | `string` | Message to broadcast |
+
+---
+
+## SQLite Database
+
+Kiren includes native SQLite support for embedded database operations. No external dependencies required.
+
+### `Kiren.sqlite(path)`
+
+Opens or creates a SQLite database.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `string` | Database file path, or `:memory:` for in-memory database |
+
+**Returns:** `Database` object
+
+```javascript
+// In-memory database
+const db = Kiren.sqlite(':memory:');
+
+// File-based database
+const db = Kiren.sqlite('app.db');
+```
+
+### Database Methods
+
+#### `db.exec(sql)`
+
+Executes one or more SQL statements. Use for DDL commands (CREATE, DROP, etc.) and statements that don't return data.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sql` | `string` | SQL statement(s) to execute |
+
+```javascript
+db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)');
+db.exec('CREATE INDEX idx_email ON users(email)');
+```
+
+#### `db.run(sql, params)`
+
+Executes a single SQL statement with optional parameters. Use for INSERT, UPDATE, DELETE operations.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sql` | `string` | SQL statement with `?` placeholders |
+| `params` | `array` | Parameter values (optional) |
+
+**Returns:** `object` with:
+- `changes` - Number of rows affected
+- `lastInsertRowid` - Last inserted row ID
+
+```javascript
+const result = db.run('INSERT INTO users (name, email) VALUES (?, ?)', ['Mert', 'mert@example.com']);
+console.log(result.lastInsertRowid); // 1
+console.log(result.changes); // 1
+
+db.run('UPDATE users SET name = ? WHERE id = ?', ['Mert K.', 1]);
+db.run('DELETE FROM users WHERE id = ?', [1]);
+```
+
+#### `db.query(sql, params)`
+
+Executes a SELECT query and returns all matching rows.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sql` | `string` | SELECT statement with `?` placeholders |
+| `params` | `array` | Parameter values (optional) |
+
+**Returns:** `array` of row objects
+
+```javascript
+// Get all users
+const users = db.query('SELECT * FROM users');
+// [{ id: 1, name: 'Mert', email: 'mert@example.com' }, ...]
+
+// With parameters
+const user = db.query('SELECT * FROM users WHERE id = ?', [1]);
+
+// With conditions
+const active = db.query('SELECT * FROM users WHERE age > ? AND status = ?', [18, 'active']);
+```
+
+#### `db.close()`
+
+Closes the database connection. Always close when done to free resources.
+
+```javascript
+db.close();
+```
+
+### Supported Data Types
+
+| JavaScript Type | SQLite Type |
+|-----------------|-------------|
+| `number` (integer) | INTEGER |
+| `number` (float) | REAL |
+| `string` | TEXT |
+| `null` / `undefined` | NULL |
+| `boolean` | INTEGER (0 or 1) |
+
+### Complete Example
+
+```javascript
+const db = Kiren.sqlite(':memory:');
+
+// Create tables
+db.exec(`
+  CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    price REAL,
+    stock INTEGER DEFAULT 0
+  )
+`);
+
+// Insert data
+db.run('INSERT INTO products (name, price, stock) VALUES (?, ?, ?)', ['Laptop', 999.99, 10]);
+db.run('INSERT INTO products (name, price, stock) VALUES (?, ?, ?)', ['Mouse', 29.99, 50]);
+db.run('INSERT INTO products (name, price, stock) VALUES (?, ?, ?)', ['Keyboard', 79.99, 25]);
+
+// Query data
+const expensive = db.query('SELECT * FROM products WHERE price > ?', [50]);
+console.log(expensive);
+// [{ id: 1, name: 'Laptop', price: 999.99, stock: 10 },
+//  { id: 3, name: 'Keyboard', price: 79.99, stock: 25 }]
+
+// Aggregate query
+const total = db.query('SELECT COUNT(*) as count, SUM(price) as total FROM products');
+console.log(total[0]); // { count: 3, total: 1109.97 }
+
+db.close();
+```
 
 ---
 

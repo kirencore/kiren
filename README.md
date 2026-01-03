@@ -7,12 +7,13 @@ Kiren is designed for building fast, standalone server applications with minimal
 ## Features
 
 - **Fast startup** - QuickJS-based engine with minimal overhead
-- **Small binary** - Single executable under 2MB
+- **Small binary** - Single executable under 4MB
 - **HTTP server** - Native Zig HTTP server with high throughput
 - **WebSocket support** - Built-in WebSocket server with rooms
+- **SQLite database** - Native SQLite for embedded data storage
 - **Node.js compatibility** - Familiar APIs (fs, path, Buffer, etc.)
 - **Module system** - CommonJS require/exports
-- **No dependencies** - Self-contained runtime
+- **No dependencies** - Self-contained runtime, no npm required
 
 ## Quick Start
 
@@ -119,6 +120,20 @@ const response = fetch("https://api.example.com/data");
 const data = response.json();
 ```
 
+### SQLite Database
+
+```javascript
+const db = Kiren.sqlite(':memory:');
+
+db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)');
+db.run('INSERT INTO users (name) VALUES (?)', ['Mert']);
+
+const users = db.query('SELECT * FROM users');
+console.log(users); // [{ id: 1, name: 'Mert' }]
+
+db.close();
+```
+
 For complete API documentation, see [docs/API.md](docs/API.md).
 
 ## Compatibility Libraries
@@ -149,7 +164,7 @@ kiren/
 │   ├── engine.zig # QuickJS bindings
 │   └── api/       # JavaScript API implementations
 ├── lib/           # JavaScript compatibility libraries
-├── deps/          # Dependencies (QuickJS)
+├── deps/          # Dependencies (QuickJS, SQLite)
 ├── tests/         # Test files
 ├── examples/      # Example applications
 └── docs/          # Documentation
