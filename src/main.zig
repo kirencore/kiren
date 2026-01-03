@@ -13,6 +13,7 @@ const fetch = @import("api/fetch.zig");
 const module = @import("api/module.zig");
 const http = @import("api/http.zig");
 const websocket = @import("api/websocket.zig");
+const sqlite = @import("api/sqlite.zig");
 const event_loop = @import("event_loop.zig");
 
 const VERSION = "0.1.0";
@@ -104,6 +105,7 @@ pub fn main() u8 {
     module.register(&eng);
     http.register(&eng);
     websocket.register(&eng);
+    sqlite.register(&eng);
     event_loop.register(&eng);
 
     if (std.mem.eql(u8, arg, "-e")) {

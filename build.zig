@@ -14,13 +14,33 @@ pub fn build(b: *std.Build) void {
         "deps/quickjs/quickjs-libc.c",
     };
 
-    // C compiler flags
+    // SQLite C source files
+    const sqlite_sources = [_][]const u8{
+        "deps/sqlite/sqlite3.c",
+    };
+
+    // C compiler flags for QuickJS
     const c_flags = [_][]const u8{
         "-DCONFIG_VERSION=\"2024-01-13\"",
         "-DCONFIG_BIGNUM",
         "-D_GNU_SOURCE",
         "-fno-sanitize=undefined", // QuickJS relies on C undefined behavior
         "-fwrapv", // Allow signed integer wrapping
+    };
+
+    // C compiler flags for SQLite
+    const sqlite_flags = [_][]const u8{
+        "-DSQLITE_DQS=0", // Disable double-quoted string literals
+        "-DSQLITE_THREADSAFE=0", // Single-threaded for simplicity
+        "-DSQLITE_DEFAULT_MEMSTATUS=0", // Disable memory status
+        "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1", // Normal sync for WAL
+        "-DSQLITE_LIKE_DOESNT_MATCH_BLOBS", // Optimize LIKE
+        "-DSQLITE_MAX_EXPR_DEPTH=0", // Unlimited expression depth
+        "-DSQLITE_OMIT_DECLTYPE", // Omit decltype
+        "-DSQLITE_OMIT_DEPRECATED", // Omit deprecated features
+        "-DSQLITE_OMIT_PROGRESS_CALLBACK", // Omit progress callback
+        "-DSQLITE_OMIT_SHARED_CACHE", // Omit shared cache
+        "-DSQLITE_USE_ALLOCA", // Use alloca for temp allocations
     };
 
     // Main executable
@@ -39,8 +59,15 @@ pub fn build(b: *std.Build) void {
         .flags = &c_flags,
     });
 
-    // Add include path
+    // Compile SQLite C files
+    exe.addCSourceFiles(.{
+        .files = &sqlite_sources,
+        .flags = &sqlite_flags,
+    });
+
+    // Add include paths
     exe.root_module.addIncludePath(b.path("deps/quickjs"));
+    exe.root_module.addIncludePath(b.path("deps/sqlite"));
 
     // Link libc
     exe.root_module.link_libc = true;
@@ -72,7 +99,12 @@ pub fn build(b: *std.Build) void {
         .files = &quickjs_sources,
         .flags = &c_flags,
     });
+    unit_tests.addCSourceFiles(.{
+        .files = &sqlite_sources,
+        .flags = &sqlite_flags,
+    });
     unit_tests.root_module.addIncludePath(b.path("deps/quickjs"));
+    unit_tests.root_module.addIncludePath(b.path("deps/sqlite"));
     unit_tests.root_module.link_libc = true;
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
