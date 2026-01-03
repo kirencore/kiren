@@ -11,6 +11,7 @@ Kiren is designed for building fast, standalone server applications with minimal
 - **HTTP server** - Native Zig HTTP server with high throughput
 - **WebSocket support** - Built-in WebSocket server with rooms
 - **SQLite database** - Native SQLite for embedded data storage
+- **Static file serving** - Built-in static middleware with MIME detection
 - **Node.js compatibility** - Familiar APIs (fs, path, Buffer, etc.)
 - **Module system** - CommonJS require/exports
 - **No dependencies** - Self-contained runtime, no npm required
@@ -132,6 +133,18 @@ const users = db.query('SELECT * FROM users');
 console.log(users); // [{ id: 1, name: 'Mert' }]
 
 db.close();
+```
+
+### Static File Serving
+
+```javascript
+const express = require("express");
+const app = express();
+
+// Serve static files from ./public directory
+app.use(express.static("./public"));
+
+app.listen(3000);
 ```
 
 For complete API documentation, see [docs/API.md](docs/API.md).

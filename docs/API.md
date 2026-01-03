@@ -841,11 +841,50 @@ app.listen(3000, function() {
 - `express.Router()` for modular routes
 - `express.json()` body parser
 - `express.cors()` CORS middleware
+- `express.static()` static file serving
 - Route parameters (`:id`)
 - Query string parsing
 - Cookie parsing
 - `req.params`, `req.query`, `req.body`, `req.headers`
 - `res.json()`, `res.send()`, `res.status()`, `res.set()`
+
+#### Static File Serving
+
+Serve static files from a directory:
+
+```javascript
+const express = require("express");
+const app = express();
+
+// Serve files from ./public directory
+app.use(express.static("./public"));
+
+// With options
+app.use(express.static("./assets", {
+  index: "index.html"  // Default index file (set to false to disable)
+}));
+
+app.listen(3000);
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `index` | `string\|false` | `"index.html"` | Index file for directories |
+
+**Supported MIME types:**
+- `.html` → `text/html`
+- `.css` → `text/css`
+- `.js` → `text/javascript`
+- `.json` → `application/json`
+- `.png` → `image/png`
+- `.jpg` → `image/jpeg`
+- Other files → `application/octet-stream`
+
+**Security features:**
+- Path traversal protection (`..` blocked)
+- URL decoding with error handling
 
 ### axios
 
