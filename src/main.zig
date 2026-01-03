@@ -84,8 +84,10 @@ pub fn main() u8 {
     };
     defer eng.deinit();
 
-    // Initialize event loop
-    var loop = event_loop.EventLoop.init(std.heap.page_allocator, eng.context);
+    // Initialize event loop (now with I/O poller)
+    var loop = event_loop.EventLoop.init(std.heap.page_allocator, eng.context) catch |err| {
+        fatal("Failed to initialize event loop: {}\n", .{err});
+    };
     defer loop.deinit();
     event_loop.setGlobalEventLoop(&loop);
 

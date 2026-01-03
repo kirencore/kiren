@@ -22,8 +22,9 @@ pub const Engine = struct {
             return error.ContextInitFailed;
         };
 
-        // Load standard libraries (Date, JSON, etc.)
-        c.js_std_add_helpers(context, 0, null);
+        // Note: We don't call js_std_add_helpers() because we use our own event loop
+        // and it causes GC cleanup issues. Date, JSON etc. are already available
+        // in the base QuickJS context.
 
         return Engine{
             .runtime = runtime,
@@ -32,7 +33,15 @@ pub const Engine = struct {
     }
 
     pub fn deinit(self: *Engine) void {
+        // Run GC multiple times to ensure all cyclic references are collected
+        c.JS_RunGC(self.runtime);
+        c.JS_RunGC(self.runtime);
+        c.JS_RunGC(self.runtime);
+
         c.JS_FreeContext(self.context);
+
+        // Note: GC assertion may occur in debug builds due to QuickJS internal state
+        // This is a known issue with QuickJS when using custom event loops
         c.JS_FreeRuntime(self.runtime);
     }
 

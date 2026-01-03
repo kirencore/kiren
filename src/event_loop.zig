@@ -1,8 +1,13 @@
 const std = @import("std");
 const engine = @import("engine.zig");
+const job_queue = @import("job_queue.zig");
+const poller = @import("io/poller.zig");
 const c = engine.c;
 
 const Allocator = std.mem.Allocator;
+const JobQueue = job_queue.JobQueue;
+const Poller = poller.Poller;
+const IoEvent = poller.IoEvent;
 
 pub const TimerType = enum {
     timeout,
@@ -18,24 +23,51 @@ pub const Timer = struct {
     cleared: bool,
 };
 
+/// I/O callback registration
+pub const IoHandler = struct {
+    fd: std.posix.fd_t,
+    callback: c.JSValue,
+    event_type: poller.EventType,
+    one_shot: bool,
+};
+
+/// Unified Event Loop with async I/O, timers, and job queue integration
 pub const EventLoop = struct {
     allocator: Allocator,
     context: *c.JSContext,
+    /// Job queue for microtasks and async jobs
+    jobs: JobQueue,
+    /// I/O poller for async I/O
+    io_poller: Poller,
+    /// Timer storage
     timers: std.ArrayListUnmanaged(Timer),
+    /// I/O handlers
+    io_handlers: std.AutoHashMap(std.posix.fd_t, IoHandler),
+    /// Next timer ID
     next_timer_id: u32,
+    /// Whether the event loop is running
     running: bool,
+    /// Whether we should exit after current iteration
+    should_exit: bool,
 
-    pub fn init(allocator: Allocator, context: *c.JSContext) EventLoop {
+    pub fn init(allocator: Allocator, context: *c.JSContext) !EventLoop {
         return EventLoop{
             .allocator = allocator,
             .context = context,
+            .jobs = JobQueue.init(allocator, context),
+            .io_poller = try Poller.init(allocator),
             .timers = .{},
+            .io_handlers = std.AutoHashMap(std.posix.fd_t, IoHandler).init(allocator),
             .next_timer_id = 1,
             .running = false,
+            .should_exit = false,
         };
     }
 
     pub fn deinit(self: *EventLoop) void {
+        // Drain any remaining QuickJS jobs before cleanup
+        self.jobs.executeQuickJSJobs();
+
         // Free all remaining timer callbacks
         for (self.timers.items) |timer| {
             if (!timer.cleared) {
@@ -43,7 +75,19 @@ pub const EventLoop = struct {
             }
         }
         self.timers.deinit(self.allocator);
+
+        // Free I/O handler callbacks
+        var it = self.io_handlers.valueIterator();
+        while (it.next()) |handler| {
+            c.JS_FreeValue(self.context, handler.callback);
+        }
+        self.io_handlers.deinit();
+
+        self.jobs.deinit();
+        self.io_poller.deinit();
     }
+
+    // ===== Timer API =====
 
     pub fn addTimer(self: *EventLoop, callback: c.JSValue, delay_ms: u64, timer_type: TimerType) !u32 {
         const id = self.next_timer_id;
@@ -70,103 +114,243 @@ pub const EventLoop = struct {
         for (self.timers.items) |*timer| {
             if (timer.id == id and !timer.cleared) {
                 timer.cleared = true;
-                // Don't free callback here - will be freed in cleanupCleared
                 return;
             }
         }
     }
 
-    pub fn hasPendingTimers(self: *EventLoop) bool {
-        for (self.timers.items) |timer| {
-            if (!timer.cleared) {
-                return true;
-            }
+    // ===== I/O API =====
+
+    /// Register a file descriptor for async I/O
+    pub fn registerIo(self: *EventLoop, fd: std.posix.fd_t, event_type: poller.EventType, callback: c.JSValue, one_shot: bool) !void {
+        const cb_dup = c.JS_DupValue(self.context, callback);
+
+        try self.io_handlers.put(fd, IoHandler{
+            .fd = fd,
+            .callback = cb_dup,
+            .event_type = event_type,
+            .one_shot = one_shot,
+        });
+
+        try self.io_poller.register(fd, event_type, null, null);
+    }
+
+    /// Unregister a file descriptor
+    pub fn unregisterIo(self: *EventLoop, fd: std.posix.fd_t) void {
+        if (self.io_handlers.fetchRemove(fd)) |entry| {
+            c.JS_FreeValue(self.context, entry.value.callback);
         }
+        self.io_poller.unregister(fd);
+    }
+
+    // ===== Main Event Loop =====
+
+    /// Check if there is pending work
+    pub fn hasPendingWork(self: *EventLoop) bool {
+        // Check for pending jobs
+        if (self.jobs.hasPendingJobs()) return true;
+
+        // Check for active timers
+        for (self.timers.items) |timer| {
+            if (!timer.cleared) return true;
+        }
+
+        // Check for I/O handlers
+        if (self.io_handlers.count() > 0) return true;
+
         return false;
     }
 
-    pub fn run(self: *EventLoop) void {
-        self.running = true;
+    /// Get timeout until next timer (in milliseconds)
+    fn getNextTimerTimeout(self: *EventLoop) i32 {
+        var min_timeout: i64 = std.math.maxInt(i64);
+        const now = std.time.milliTimestamp();
 
-        while (self.running and self.hasPendingTimers()) {
-            const now = std.time.milliTimestamp();
-            var executed_any = false;
-
-            // Check and execute ready timers
-            var i: usize = 0;
-            while (i < self.timers.items.len) {
-                var timer = &self.timers.items[i];
-
-                if (timer.cleared) {
-                    i += 1;
-                    continue;
+        for (self.timers.items) |timer| {
+            if (!timer.cleared) {
+                const remaining = timer.next_run - now;
+                if (remaining < min_timeout) {
+                    min_timeout = remaining;
                 }
-
-                if (now >= timer.next_run) {
-                    // Execute callback
-                    const result = c.JS_Call(
-                        self.context,
-                        timer.callback,
-                        engine.makeUndefined(),
-                        0,
-                        null,
-                    );
-
-                    // Handle exception
-                    if (c.JS_IsException(result) != 0) {
-                        self.dumpError();
-                    }
-                    c.JS_FreeValue(self.context, result);
-
-                    executed_any = true;
-
-                    // Handle interval vs timeout
-                    if (timer.timer_type == .interval and !timer.cleared) {
-                        timer.next_run = now + @as(i64, @intCast(timer.interval_ms));
-                    } else {
-                        // Mark as cleared - callback will be freed in cleanupCleared
-                        timer.cleared = true;
-                    }
-                }
-
-                i += 1;
             }
-
-            // Execute pending jobs (Promises)
-            _ = self.executePendingJobs();
-
-            // Small sleep to prevent CPU spinning
-            if (!executed_any) {
-                std.Thread.sleep(1 * std.time.ns_per_ms);
-            }
-
-            // Cleanup cleared timers periodically
-            self.cleanupCleared();
         }
 
-        self.running = false;
+        if (min_timeout == std.math.maxInt(i64)) {
+            // No timers, use default timeout or infinite if no I/O
+            return if (self.io_handlers.count() > 0) 100 else -1;
+        }
+
+        // Clamp to valid range
+        if (min_timeout <= 0) return 0;
+        if (min_timeout > 60000) return 60000; // Max 60 seconds
+        return @intCast(min_timeout);
     }
 
-    pub fn executePendingJobs(self: *EventLoop) bool {
-        var ctx: ?*c.JSContext = null;
-        var executed = false;
+    /// Execute ready timers
+    fn executeReadyTimers(self: *EventLoop) void {
+        const now = std.time.milliTimestamp();
 
-        while (true) {
-            const ret = c.JS_ExecutePendingJob(c.JS_GetRuntime(self.context), &ctx);
-            if (ret <= 0) {
-                if (ret < 0) {
+        var i: usize = 0;
+        while (i < self.timers.items.len) {
+            var timer = &self.timers.items[i];
+
+            if (timer.cleared) {
+                i += 1;
+                continue;
+            }
+
+            if (now >= timer.next_run) {
+                // Execute callback
+                const result = c.JS_Call(
+                    self.context,
+                    timer.callback,
+                    engine.makeUndefined(),
+                    0,
+                    null,
+                );
+
+                // Handle exception
+                if (c.JS_IsException(result) != 0) {
                     self.dumpError();
                 }
-                break;
-            }
-            executed = true;
-        }
+                c.JS_FreeValue(self.context, result);
 
-        return executed;
+                // Drain microtasks after timer execution
+                self.jobs.drainMicrotasks();
+
+                // Handle interval vs timeout
+                if (timer.timer_type == .interval and !timer.cleared) {
+                    timer.next_run = now + @as(i64, @intCast(timer.interval_ms));
+                } else {
+                    timer.cleared = true;
+                }
+            }
+
+            i += 1;
+        }
     }
 
-    pub fn stop(self: *EventLoop) void {
+    /// Handle I/O events
+    fn handleIoEvents(self: *EventLoop, events: []IoEvent) void {
+        for (events) |event| {
+            if (self.io_handlers.get(event.fd)) |handler| {
+                // Create event object for JavaScript
+                const event_obj = c.JS_NewObject(self.context);
+                _ = c.JS_SetPropertyStr(self.context, event_obj, "fd", c.JS_NewInt32(self.context, event.fd));
+                _ = c.JS_SetPropertyStr(self.context, event_obj, "readable", engine.makeBool(event.readable));
+                _ = c.JS_SetPropertyStr(self.context, event_obj, "writable", engine.makeBool(event.writable));
+                _ = c.JS_SetPropertyStr(self.context, event_obj, "error", engine.makeBool(event.error_occurred));
+                _ = c.JS_SetPropertyStr(self.context, event_obj, "hangup", engine.makeBool(event.hangup));
+
+                // Call the callback
+                var args = [_]c.JSValue{event_obj};
+                const result = c.JS_Call(
+                    self.context,
+                    handler.callback,
+                    engine.makeUndefined(),
+                    1,
+                    &args,
+                );
+
+                // Handle exception
+                if (c.JS_IsException(result) != 0) {
+                    self.dumpError();
+                }
+                c.JS_FreeValue(self.context, result);
+                c.JS_FreeValue(self.context, event_obj);
+
+                // Drain microtasks after I/O callback
+                self.jobs.drainMicrotasks();
+
+                // Remove if one-shot
+                if (handler.one_shot) {
+                    self.unregisterIo(event.fd);
+                }
+            }
+        }
+    }
+
+    /// Run the event loop
+    pub fn run(self: *EventLoop) void {
+        self.running = true;
+        self.should_exit = false;
+
+        while (self.running and !self.should_exit and self.hasPendingWork()) {
+            // 1. Drain all microtasks first
+            self.jobs.drainMicrotasks();
+
+            // 2. Calculate timeout based on nearest timer
+            const timeout = self.getNextTimerTimeout();
+
+            // 3. Poll for I/O events
+            const io_events = self.io_poller.poll(timeout) catch |err| {
+                std.debug.print("I/O poll error: {}\n", .{err});
+                continue;
+            };
+
+            // 4. Handle I/O events
+            if (io_events.len > 0) {
+                self.handleIoEvents(io_events);
+            }
+
+            // 5. Execute ready timers
+            self.executeReadyTimers();
+
+            // 6. Execute immediate callbacks
+            while (self.jobs.executeNextImmediate()) {
+                // Keep executing immediates until none left
+            }
+
+            // 7. Cleanup cleared timers periodically
+            self.cleanupCleared();
+
+            // If no I/O or timers and only jobs, give CPU a break
+            if (io_events.len == 0 and !self.hasActiveTimers()) {
+                if (self.jobs.hasPendingJobs()) {
+                    // Just process jobs without sleeping
+                    continue;
+                } else if (self.io_handlers.count() == 0) {
+                    // Nothing to do, exit
+                    break;
+                }
+            }
+        }
+
         self.running = false;
+    }
+
+    /// Run one iteration of the event loop (for integration with external loops)
+    pub fn runOnce(self: *EventLoop) bool {
+        // Drain microtasks
+        self.jobs.drainMicrotasks();
+
+        // Poll with 0 timeout (non-blocking)
+        const io_events = self.io_poller.poll(0) catch return false;
+
+        // Handle I/O
+        if (io_events.len > 0) {
+            self.handleIoEvents(io_events);
+        }
+
+        // Execute ready timers
+        self.executeReadyTimers();
+
+        // Execute one immediate
+        _ = self.jobs.executeNextImmediate();
+
+        return self.hasPendingWork();
+    }
+
+    /// Stop the event loop
+    pub fn stop(self: *EventLoop) void {
+        self.should_exit = true;
+    }
+
+    fn hasActiveTimers(self: *EventLoop) bool {
+        for (self.timers.items) |timer| {
+            if (!timer.cleared) return true;
+        }
+        return false;
     }
 
     fn cleanupCleared(self: *EventLoop) void {
@@ -207,18 +391,30 @@ pub const EventLoop = struct {
     }
 };
 
-// Global event loop pointer for C callbacks
+// Global event loop pointer
 var global_event_loop: ?*EventLoop = null;
 
 pub fn setGlobalEventLoop(loop: *EventLoop) void {
     global_event_loop = loop;
+    // Also set the job queue global
+    job_queue.setGlobalJobQueue(&loop.jobs);
+    // And the poller global
+    poller.setGlobalPoller(&loop.io_poller);
 }
 
 pub fn getGlobalEventLoop() ?*EventLoop {
     return global_event_loop;
 }
 
-// JavaScript API functions
+/// Convenience function to drain microtasks from anywhere
+pub fn drainMicrotasks() void {
+    if (global_event_loop) |loop| {
+        loop.jobs.drainMicrotasks();
+    }
+}
+
+// ===== JavaScript API functions =====
+
 pub fn jsSetTimeout(
     ctx: ?*c.JSContext,
     _: c.JSValue,
@@ -313,11 +509,10 @@ pub fn jsClearInterval(
     argc: c_int,
     argv: [*c]c.JSValue,
 ) callconv(.c) c.JSValue {
-    // Same implementation as clearTimeout
     return jsClearTimeout(ctx, this, argc, argv);
 }
 
-// Register timer functions to global object
+/// Register timer functions to global object
 pub fn register(eng: *engine.Engine) void {
     const global = eng.getGlobalObject();
     defer eng.freeValue(global);
@@ -326,4 +521,7 @@ pub fn register(eng: *engine.Engine) void {
     eng.setProperty(global, "setInterval", eng.newCFunction(jsSetInterval, "setInterval", 2));
     eng.setProperty(global, "clearTimeout", eng.newCFunction(jsClearTimeout, "clearTimeout", 1));
     eng.setProperty(global, "clearInterval", eng.newCFunction(jsClearInterval, "clearInterval", 1));
+
+    // Also register job queue functions
+    job_queue.register(eng);
 }
