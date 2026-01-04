@@ -4,6 +4,7 @@ Kiren is a lightweight JavaScript runtime built with Zig and QuickJS. This docum
 
 ## Table of Contents
 
+- [Bundle Command](#bundle-command)
 - [Kiren Global Object](#kiren-global-object)
 - [HTTP Server](#http-server)
 - [WebSocket Server](#websocket-server)
@@ -19,6 +20,64 @@ Kiren is a lightweight JavaScript runtime built with Zig and QuickJS. This docum
 - [Console](#console)
 - [Module System](#module-system)
 - [Compatibility Libraries](#compatibility-libraries)
+
+---
+
+## Bundle Command
+
+Create standalone executables from your JavaScript applications.
+
+### Basic Usage
+
+```bash
+# Create standalone executable
+kiren bundle app.js
+
+# Specify output name
+kiren bundle app.js -o myapp
+
+# Create JS bundle only (no executable)
+kiren bundle app.js --js-only
+```
+
+### How It Works
+
+The bundle command:
+1. Parses your entry file and finds all `require()` calls
+2. Recursively bundles all local dependencies
+3. Creates a self-contained executable with embedded JavaScript
+
+### Example
+
+```javascript
+// app.js
+const utils = require("./utils.js");
+console.log("Sum:", utils.add(2, 3));
+
+// utils.js
+module.exports = {
+  add: function(a, b) { return a + b; }
+};
+```
+
+```bash
+kiren bundle app.js -o myapp
+./myapp
+# Output: Sum: 5
+```
+
+### Output Options
+
+| Option | Description |
+|--------|-------------|
+| `-o <name>` | Output file name (default: input name without .js) |
+| `--js-only` | Create bundled JS file instead of executable |
+
+### Notes
+
+- Only local dependencies (`./` or `../` paths) are bundled
+- Built-in modules (express, axios, etc.) are available at runtime
+- The output executable is self-contained and requires no external files
 
 ---
 

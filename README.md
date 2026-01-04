@@ -8,6 +8,7 @@ Kiren is designed for building fast, standalone server applications with minimal
 
 - **Fast startup** - QuickJS-based engine with minimal overhead
 - **Small binary** - Single executable under 4MB
+- **Bundle to executable** - Create standalone apps with `kiren bundle`
 - **HTTP server** - Native Zig HTTP server with high throughput
 - **WebSocket support** - Built-in WebSocket server with rooms
 - **SQLite database** - Native SQLite for embedded data storage
@@ -145,6 +146,16 @@ const app = express();
 app.use(express.static("./public"));
 
 app.listen(3000);
+```
+
+### Bundle to Executable
+
+```bash
+# Create standalone executable
+kiren bundle server.js -o server
+
+# Run without kiren installed
+./server
 ```
 
 For complete API documentation, see [docs/API.md](docs/API.md).

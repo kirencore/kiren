@@ -15,6 +15,7 @@ const http = @import("api/http.zig");
 const websocket = @import("api/websocket.zig");
 const sqlite = @import("api/sqlite.zig");
 const event_loop = @import("event_loop.zig");
+const bundler = @import("bundler.zig");
 
 const VERSION = "0.1.0";
 
@@ -27,14 +28,21 @@ fn printUsage() void {
         \\Kiren - JavaScript Runtime
         \\
         \\Usage:
-        \\  kiren <file.js>       Run a JavaScript file
-        \\  kiren -e <code>       Evaluate inline JavaScript
-        \\  kiren --version       Show version info
-        \\  kiren --help          Show this help message
+        \\  kiren <file.js>           Run a JavaScript file
+        \\  kiren -e <code>           Evaluate inline JavaScript
+        \\  kiren bundle <file.js>    Create standalone executable
+        \\  kiren --version           Show version info
+        \\  kiren --help              Show this help message
+        \\
+        \\Bundle options:
+        \\  kiren bundle app.js                Create ./app executable
+        \\  kiren bundle app.js -o myapp       Create ./myapp executable
+        \\  kiren bundle app.js --js-only      Create bundled JS file only
         \\
         \\Examples:
         \\  kiren script.js
         \\  kiren -e "console.log('Hello!')"
+        \\  kiren bundle server.js -o server
         \\
     , .{});
 }
@@ -49,6 +57,11 @@ fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 pub fn main() u8 {
+    // Check for embedded code first (for bundled executables)
+    if (bundler.getEmbeddedCode()) |embedded_code| {
+        return runEmbeddedCode(embedded_code);
+    }
+
     // Collect all arguments for process.argv
     var args = std.process.args();
     var argv_list: std.ArrayListUnmanaged([:0]const u8) = .{};
@@ -68,6 +81,11 @@ pub fn main() u8 {
     }
 
     const arg = first_arg.?;
+
+    // Handle bundle command
+    if (std.mem.eql(u8, arg, "bundle")) {
+        return handleBundle(argv_list.items);
+    }
 
     if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
         printUsage();
@@ -191,5 +209,122 @@ fn printResult(eng: *Engine, val: engine.JSValue) void {
             print("{s}\n", .{str});
             c.JS_FreeCString(eng.context, str);
         }
+    }
+}
+
+fn handleBundle(argv: [][:0]const u8) u8 {
+    // Parse bundle arguments: bundle <input.js> [-o <output>] [--js-only]
+    if (argv.len < 3) {
+        print("Error: bundle requires an input file\n", .{});
+        print("Usage: kiren bundle <file.js> [-o output]\n", .{});
+        return 1;
+    }
+
+    const input_file = argv[2];
+    var output_file: ?[]const u8 = null;
+    var js_only = false;
+
+    // Parse options
+    var i: usize = 3;
+    while (i < argv.len) : (i += 1) {
+        if (std.mem.eql(u8, argv[i], "-o") and i + 1 < argv.len) {
+            output_file = argv[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, argv[i], "--js-only")) {
+            js_only = true;
+        }
+    }
+
+    // Default output name: remove .js extension from input
+    var default_output_buf: [256]u8 = undefined;
+    const default_output = if (output_file) |out| out else blk: {
+        const basename = std.fs.path.basename(input_file);
+        if (std.mem.endsWith(u8, basename, ".js")) {
+            const name_without_ext = basename[0 .. basename.len - 3];
+            break :blk std.fmt.bufPrint(&default_output_buf, "{s}", .{name_without_ext}) catch input_file;
+        }
+        break :blk input_file;
+    };
+
+    print("Bundling {s}...\n", .{input_file});
+
+    if (js_only) {
+        // Create JS bundle only
+        var js_output_buf: [260]u8 = undefined;
+        const js_output = std.fmt.bufPrint(&js_output_buf, "{s}.bundle.js", .{default_output}) catch {
+            print("Error: output path too long\n", .{});
+            return 1;
+        };
+
+        bundler.bundleToFile(input_file, js_output) catch |err| {
+            print("Error: Failed to bundle: {}\n", .{err});
+            return 1;
+        };
+
+        print("Created {s}\n", .{js_output});
+    } else {
+        // Create standalone executable
+        bundler.bundleToExecutable(input_file, default_output) catch |err| {
+            print("Error: Failed to create executable: {}\n", .{err});
+            return 1;
+        };
+
+        print("Created {s}\n", .{default_output});
+        print("Run with: ./{s}\n", .{default_output});
+    }
+
+    return 0;
+}
+
+fn runEmbeddedCode(code: []const u8) u8 {
+    // Initialize engine
+    var eng = Engine.init() catch |err| {
+        print("Failed to initialize engine: {}\n", .{err});
+        return 1;
+    };
+    defer eng.deinit();
+
+    // Initialize event loop
+    var loop = event_loop.EventLoop.init(std.heap.page_allocator, eng.context) catch |err| {
+        print("Failed to initialize event loop: {}\n", .{err});
+        return 1;
+    };
+    defer loop.deinit();
+    event_loop.setGlobalEventLoop(&loop);
+
+    // Set process.argv from actual args
+    var args = std.process.args();
+    var argv_list: std.ArrayListUnmanaged([:0]const u8) = .{};
+    defer argv_list.deinit(std.heap.page_allocator);
+
+    while (args.next()) |arg| {
+        argv_list.append(std.heap.page_allocator, arg) catch {};
+    }
+    process.setArgv(argv_list.items);
+
+    // Register APIs
+    console.register(&eng);
+    process.register(&eng);
+    path_mod.register(&eng);
+    fs.register(&eng);
+    buffer.register(&eng);
+    url.register(&eng);
+    encoding.register(&eng);
+    crypto.register(&eng);
+    fetch.register(&eng);
+    module.register(&eng);
+    http.register(&eng);
+    websocket.register(&eng);
+    sqlite.register(&eng);
+    event_loop.register(&eng);
+
+    // Execute embedded code
+    const result = eng.eval(code, "<embedded>");
+    if (result) |val| {
+        eng.freeValue(val);
+        loop.run();
+        return 0;
+    } else |_| {
+        return 1;
     }
 }
