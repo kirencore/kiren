@@ -2,7 +2,7 @@ const express = require('express');
 const app = express();
 
 // Serve static files from 'public' directory
-app.use(express.static('public'));
+app.use(express.static('./public'));
 
 // API route
 app.get('/api/hello', function(req, res) {

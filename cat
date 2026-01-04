@@ -1,5 +1,0 @@
-sleep: invalid time interval: ./zig-out/bin/kiren
-sleep: invalid time interval: -e
-sleep: invalid time interval: var e=require("kiren-express");console.log(typeof e);
-usage: sleep number[unit] [...]
-Unit can be 's' (seconds, the default), m (minutes), h (hours), or d (days).
