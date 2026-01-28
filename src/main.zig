@@ -16,6 +16,7 @@ const websocket = @import("api/websocket.zig");
 const sqlite = @import("api/sqlite.zig");
 const event_loop = @import("event_loop.zig");
 const bundler = @import("bundler.zig");
+const edge_runtime = @import("edge/runtime.zig");
 
 const VERSION = "0.1.0";
 
@@ -31,6 +32,7 @@ fn printUsage() void {
         \\  kiren <file.js>           Run a JavaScript file
         \\  kiren -e <code>           Evaluate inline JavaScript
         \\  kiren bundle <file.js>    Create standalone executable
+        \\  kiren edge serve          Start edge runtime server
         \\  kiren --version           Show version info
         \\  kiren --help              Show this help message
         \\
@@ -39,10 +41,15 @@ fn printUsage() void {
         \\  kiren bundle app.js -o myapp       Create ./myapp executable
         \\  kiren bundle app.js --js-only      Create bundled JS file only
         \\
+        \\Edge options:
+        \\  kiren edge serve                   Start with kiren.edge.json
+        \\  kiren edge serve -c config.json    Start with custom config
+        \\
         \\Examples:
         \\  kiren script.js
         \\  kiren -e "console.log('Hello!')"
         \\  kiren bundle server.js -o server
+        \\  kiren edge serve
         \\
     , .{});
 }
@@ -85,6 +92,11 @@ pub fn main() u8 {
     // Handle bundle command
     if (std.mem.eql(u8, arg, "bundle")) {
         return handleBundle(argv_list.items);
+    }
+
+    // Handle edge command
+    if (std.mem.eql(u8, arg, "edge")) {
+        return handleEdge(argv_list.items);
     }
 
     if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
@@ -274,6 +286,56 @@ fn handleBundle(argv: [][:0]const u8) u8 {
     }
 
     return 0;
+}
+
+fn handleEdge(argv: [][:0]const u8) u8 {
+    // Parse edge subcommand: edge serve [-c config.json]
+    if (argv.len < 3) {
+        print("Kiren Edge Runtime\n\n", .{});
+        print("Usage:\n", .{});
+        print("  kiren edge serve              Start edge server (uses kiren.edge.json)\n", .{});
+        print("  kiren edge serve -c <file>    Start with custom config\n", .{});
+        return 1;
+    }
+
+    const subcommand = argv[2];
+
+    if (std.mem.eql(u8, subcommand, "serve")) {
+        // Parse config option
+        var config_path: []const u8 = "kiren.edge.json";
+        var i: usize = 3;
+        while (i < argv.len) : (i += 1) {
+            if (std.mem.eql(u8, argv[i], "-c") and i + 1 < argv.len) {
+                config_path = argv[i + 1];
+                i += 1;
+            }
+        }
+
+        // Initialize edge runtime
+        var runtime = edge_runtime.EdgeRuntime.init(std.heap.page_allocator) catch |err| {
+            print("Failed to initialize edge runtime: {}\n", .{err});
+            return 1;
+        };
+        defer runtime.deinit();
+
+        // Load config
+        runtime.loadConfig(config_path) catch |err| {
+            print("Failed to load config: {}\n", .{err});
+            return 1;
+        };
+
+        // Start server
+        runtime.start() catch |err| {
+            print("Server error: {}\n", .{err});
+            return 1;
+        };
+
+        return 0;
+    }
+
+    print("Unknown edge command: {s}\n", .{subcommand});
+    print("Available commands: serve\n", .{});
+    return 1;
 }
 
 fn runEmbeddedCode(code: []const u8) u8 {
